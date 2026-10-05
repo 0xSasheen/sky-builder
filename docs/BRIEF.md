@@ -1,4 +1,4 @@
-# Sky Tool: project brief
+# Sky Builder: project brief
 
 This is the full specification. `CLAUDE.md` holds the short version of the
 rules; this file explains why they exist and everything the tool needs to do.
@@ -40,6 +40,10 @@ The tool replaces that loop:
 4. Copy or download the finished `sky3_image.json`.
 
 The preview must agree with the game. That is the whole value of the tool.
+
+**Target environment:** plain Nuit on Minecraft Java 26.x with vanilla data. Don't
+assume the user has anything else installed: no datapacks that change timelines,
+no shader packs, no other sky mods.
 
 ---
 
@@ -107,9 +111,9 @@ both in $[-1, 1]$, lies at $\mathbf{c} + s\,\mathbf{r} + t\,\mathbf{u}$.
 
 This is the table from `reference/sky_convert.py`. It was verified against a
 real atlas (the side faces form a seamless ring and the top face lines up with
-all four) and against Nuit's `SquareTexturedSkybox`. **Exception: the bottom
-face's orientation is unverified**, because the test atlas had a flat-colour
-bottom. It is under the ground in game, so it rarely matters.
+all four), and **all six rows, including the bottom face**, were verified against
+Nuit's `Utils.MATRIX4F_ROTATED_FACE`, which both `SquareTexturedSkybox` and
+`MultiTexturedSkybox` use (see PLAN §1.4). A unit test keeps it checked.
 
 Within a cell, image row 0 (the top of the cell) is $t = +1$, and the left
 column is $s = -1$.
@@ -127,7 +131,7 @@ conversion table has AM and PM swapped; ignore it.)
 
 ## 4. How Nuit 26.2 renders a `multi-textured` layer
 
-Confirmed by reading the source (§13). Re-check it yourself during planning.
+Confirmed by reading the source (§13), and re-checked during planning (PLAN §1).
 
 1. **Placement.** For each of the 6 faces, the renderer intersects each
    texture's `uvRange` with that face's cell (`Utils.TEXTURE_FACES`). It maps
@@ -149,16 +153,32 @@ Confirmed by reading the source (§13). Re-check it yourself during planning.
    so `mapping` is a fixed, per-layer rotation applied **before** the daily
    spin. Changing `mapping` on the hero layer alone moves the hero relative to
    the clouds, and it stays there as everything spins. With `axis` = [0, 0, 0]
-   the spin is about +y.
+   the spin is about +y. **The spin is applied only if `axis` has at least one
+   keyframe**, so the tool must always write `axis`.
 6. **Mapping order.** The mapping quaternion is built as
    `rotateLocalX(x).rotateLocalY(y).rotateLocalZ(z)` starting from identity,
    giving $M = R_z R_y R_x$: X is applied first, then Y, then Z. Three.js Euler
-   order `'ZYX'` produces exactly the matrix $R_z R_y R_x$. **Verify this
-   against `Rotation.java` during planning.**
-7. **Spin.** `speed` is full rotations per in-game day. With
-   `skyboxRotation: false`, the tool assumes a linear spin of
-   $\theta(T) = \text{speed} \cdot 360° \cdot T / 24000$. The direction and the
-   starting phase are unverified (§12).
+   order `'ZYX'` produces exactly the matrix $R_z R_y R_x$. Verified against
+   `Rotation.java` and numerically against three r186. Signs: $+X$ tilts the
+   North face up and $+Y$ turns it toward west. Both follow from JOML and
+   Three.js sharing the same right-handed convention.
+7. **Spin.** With `skyboxRotation: false`, Nuit does **not** use `speed` as a
+   rate. Any non-zero `speed` makes the layer follow vanilla's sun angle:
+   $\theta(T)$ = the `minecraft:visual/sun_angle` environment attribute, in
+   degrees, applied as $Y(+\theta)$. (`speed: 0` disables the spin; only
+   `skyboxRotation: true` gives an even $\text{speed}\cdot 360°\cdot T/24000$.)
+   In vanilla 26.2 (`data/minecraft/timeline/day.json`), `sun_angle` runs from
+   0° at tick 6000 (noon) to 360° one day later, eased by
+   `cubic_bezier [0.362, 0.241, 0.638, 0.759]`:
+
+   $$p = \operatorname{frac}\!\left(\frac{T - 6000}{24000}\right), \qquad
+   \theta(T) = 360° \cdot \operatorname{bezier}(p)$$
+
+   where $\operatorname{bezier}$ is a CSS-style cubic Bézier: solve
+   $x(s) = p$, then return $y(s)$. This matches the pre-timeline vanilla
+   formula to within 0.06°. Key values: θ(0) ≈ 282.4°, θ(6000) = 0°,
+   θ(12000) ≈ 77.6°, θ(18000) = 180°. So with mapping Y = 0, the hero is due
+   north at noon, about 78° east of north at tick 0, and due south at midnight.
 
 ---
 
@@ -233,7 +253,9 @@ $$\text{minV} = \tfrac12 + \tfrac{1-k}{4}, \qquad \text{maxV} = \tfrac12 + \tfra
 
 5. Tilt so the bottom edge lands at elevation $b$. The centre sits at
    $b + \beta/2$, so mapping X $= b + \tfrac{\beta}{2}$.
-6. Mapping Y $= \psi$, with the sign convention from `src/constants.ts`.
+6. Mapping Y $= \psi$. The ψ slider is the raw mapping Y value (positive turns
+   the hero toward west); a readout shows the resulting compass direction at
+   noon. The preview applies it with the sign constant from `src/constants.ts`.
 7. Derived readouts: angular width $= 2\arctan(ak)$; top-edge elevation $= X + \beta/2$.
 
 **Scaling by a factor $f$** (for "×1.15"-style buttons) multiplies $k$, not
@@ -286,6 +308,9 @@ precision. Image sizes are $W \times H$.
 ★ Case 3 is the configuration **currently running in game and confirmed to
 look right**. Cases 2–4 come from repeated scaling: from case 1, scale ×1.5,
 then ×1.15 or ×1.5. In the file, `k` values are given unrounded; use them as-is.
+**Drive cases 2–4 from `k`, not `heightDeg`:** for case 4, the rounded
+`heightDeg` (79.39) gives X = 34.695 exactly, a rounding tie, while `k` gives
+34.695014, which rounds to 34.70.
 
 ---
 
@@ -306,9 +331,9 @@ Each slider has a linked number box, and the two stay in sync.
 | Angular height β | 5°–87° | 40.5° | Or edit k directly |
 | Scale buttons | ×1.15, ×1.5, ÷1.15, ÷1.5 | – | Multiply **k** (§6.1) |
 | Bottom elevation b | −30° to 60° | 3° | |
-| Compass ψ (mapping Y) | −180° to 180° | 0° | |
-| Mode | tilted / wall | tilted | Wall mode is a stretch goal |
-| Time of day | 0–23 999 ticks | 0 | **Preview only.** Shows clock time. Play/pause |
+| Compass ψ (mapping Y) | −180° to 180° | 0° | Raw mapping Y; positive = toward west |
+| Mode | tilted / wall | tilted | Wall mode ships in M3 |
+| Time of day | 0–23 999 ticks | 6000 (noon) | **Preview only.** Shows clock time and θ. Play/pause. At noon θ = 0, so the hero sits exactly where the sliders say |
 | Camera FOV | 30–110 | 70 | Minecraft's default is 70 |
 | Texture path | text | `sasheen:textures/sky/hero.png` | |
 | Layer | integer | 3 | |
@@ -335,8 +360,11 @@ to each constraint limit, and warnings when a §6.1 constraint is broken.
   Each is centred at $\mathbf{c}$, its local x axis along $\mathbf{r}$ and its
   local y axis along $\mathbf{u}$, facing inward. Texture each one with its
   cell cropped from the atlas onto a canvas, so nothing bleeds between cells.
-  Use `ClampToEdgeWrapping`, `SRGBColorSpace`, `MeshBasicMaterial`, and
-  `depthWrite: false`. **Do not use `CubeTexture` or `scene.background`**:
+  Use `ClampToEdgeWrapping`, `MeshBasicMaterial`, and `depthWrite: false`.
+  **No colour conversion:** textures use `NoColorSpace` and the renderer uses
+  `outputColorSpace = LinearSRGBColorSpace`, so blending happens in gamma space
+  as it does in Minecraft. This matters for semi-transparent hero edges and the
+  crossfade. **Do not use `CubeTexture` or `scene.background`**:
   their conventions differ, and the face table is already verified.
 - **Hero:** a `PlaneGeometry` built with the inverse map (§6.3) from the
   rounded JSON `uvRange`. It lies on the plane z = −1 (the North face), facing
@@ -345,7 +373,7 @@ to each constraint limit, and warnings when a §6.1 constraint is broken.
   constants. Use `transparent: true`, `depthTest: false`, and a `renderOrder`
   above the sky.
 - **Spin:** put the sky planes and `heroGroup` together in a `spinGroup` whose
-  y rotation is the time spin from §4.7. The world transform is then
+  y rotation is $+\theta(T)$ from §4.7. The world transform is then
   $\text{Spin} \cdot M \cdot \mathbf{v}$, matching §4.5.
 - **Optional:** a toggle overlay that draws face edges and labels.
 - **Stretch:** day and night atlases with a crossfade preview using the day
@@ -360,7 +388,7 @@ to each constraint limit, and warnings when a §6.1 constraint is broken.
 - Editing the sky atlases themselves.
 - Any server or backend. The tool is a static site.
 
-**Stretch goals:** wall mode; day/night crossfade preview; several heroes (each
+**Stretch goals (after M5):** day/night crossfade preview; several heroes (each
 would be its own layer file, since `mapping` is per layer); remembering the
 last settings in `localStorage`.
 
@@ -370,8 +398,10 @@ last settings in `localStorage`.
 
 - Vite `vanilla-ts`, TypeScript `strict`, `three` + `@types/three`.
 - Tests: `vitest` (add it with `npm i -D vitest`).
-- `vite.config.ts` must set `base: '/sky-tool/'` for GitHub Pages.
-- Add `reference/private/` to `.gitignore`.
+- The repo and the site are named **sky-builder**. `vite.config.ts` must set
+  `base: '/sky-builder/'` for GitHub Pages.
+- `reference/private/` is git-ignored (done).
+- `tsconfig.json` must set `"strict": true` (the scaffold omits it).
 - Suggested layout (adjust it in the plan if you have a better one):
 
 ```
@@ -391,19 +421,19 @@ tests/
 
 ## 12. Open questions and unverified facts
 
-Raise these in the plan. Don't guess silently.
+Raise these in the plan. Don't guess silently. Status as of 2026-10-04:
 
-1. **Sign of mapping X.** The working config has X = +22.47, and the hero
-   appears above the horizon, so positive X tilts the North face **up**.
-   The preview must reproduce this.
-2. **Sign of mapping Y.** Reading the code suggests positive Y turns the hero
-   toward the **west**. Not yet confirmed in game.
-3. **Spin direction and starting phase** at tick 0. Needed only for the
-   time-of-day preview.
-4. **Bottom face orientation** (§3). Cosmetic.
-5. **Whether Minecraft applies `hero.png.mcmeta`** (blur and clamp) to Nuit's
-   textures. Expected to, but untested.
-6. Whether wall mode and the crossfade preview are wanted in the first version.
+1. **Sign of mapping X.** ✅ Closed. Positive X tilts the North face **up**. The
+   source says so, and the running config (X = +22.47, hero above the horizon)
+   confirms it in game.
+2. **Sign of mapping Y.** ⏳ Source says positive Y turns the hero toward the
+   **west**. Awaiting one in-game check (PLAN §10).
+3. **Spin direction and phase.** ✅ Closed from source and vanilla 26.2 data;
+   see §4.7.
+4. **Bottom face orientation.** ✅ Closed from source; see §3.
+5. **Whether Minecraft applies `hero.png.mcmeta`.** ⏳ Not settled by the
+   source. Keep the download; check in game (PLAN §10).
+6. **Scope.** ✅ Wall mode ships in M3. The crossfade waits until after M5.
 
 ---
 
@@ -436,6 +466,13 @@ Base path:
 - `common/src/main/java/me/flashyreese/mods/nuit/components/Blend.java`: the blend string
 - `common/src/main/java/me/flashyreese/mods/nuit/skybox/textured/SquareTexturedSkybox.java`: face orientation for the sky layers
 
+### Vanilla 26.2 data
+
+Minecraft's built-in datapack is mirrored at `https://github.com/misode/mcmeta`
+(tag `26.2-data`). `data/minecraft/timeline/day.json` holds the
+`minecraft:visual/sun_angle` track used in §4.7. Wiki reference:
+`https://minecraft.wiki/w/Environment_attribute` and `https://minecraft.wiki/w/Timeline`.
+
 ### Three.js
 `https://threejs.org/docs/`: in particular `Euler` (rotation order),
 `PlaneGeometry`, `CanvasTexture`, `MeshBasicMaterial` and `PerspectiveCamera`.
@@ -457,8 +494,8 @@ After each one, stop and report what was done and exactly how to check it.
     bottom, W on the left and E on the right.
   - Turning right from north passes E, then S, then W, with no seams or jumps.
 - **M3, Hero.** The hero is rendered from the JSON. Sliders, readouts and
-  warnings are live. Check: with case 3's values and the test card, at yaw 0
-  and pitch 22.47° the card is an upright rectangle centred on screen, with
+  warnings are live. Check: with case 3's values, the test card and the time
+  at 6000 (θ = 0), at yaw 0 and pitch 22.47° the card is an upright rectangle centred on screen, with
   TOP at the top, L on the left, and its bottom edge 10° below the horizon.
 - **M4, Time and I/O.** Time-of-day spin with play/pause; Copy and Download;
   `.mcmeta` download; JSON import that restores the sliders (round trip:
