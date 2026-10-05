@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "type": "nuit:square-textured",
+  "texture": "sasheen:textures/sky/day.png",
+  "blend": {"type": "normal"},
+  "properties": {
+    "layer": 2,
+    "fade": {
+      "alwaysOn": false,
+      "duration": 24000,
+      "keyFrames": {
+        "4000": 1.0,
+        "8000": 1.0,
+        "16000": 0.0,
+        "20000": 0.0
+      }
+    },
+    "rotation": {
+      "speed": 1.0,
+      "mapping": {"0": [0.0, 0.0, 0.0]},
+      "axis": {"0": [0.0, 0.0, 0.0]},
+      "skyboxRotation": false
+    },
+    "transitionInDuration": 20,
+    "transitionOutDuration": 20,
+    "fog": {
+      "modifyColors": false, "red": 0.0, "green": 0.0, "blue": 0.0,
+      "modifyDensity": false, "density": 1.0,
+      "showInDenseFog": false
+    },
+    "sunSkyTint": false,
+    "visibleUnderwater": true
+  },
+  "conditions": {
+    "worlds": {"entries": ["minecraft:overworld"]},
+    "dimensions": {"entries": []},
+    "weather": {"entries": ["clear", "rain", "thunder", "rain_biome", "rain_thunder", "snow", "snow_thunder"]},
+    "biomes": {"entries": []},
+    "xRanges": {"entries": []},
+    "yRanges": {"entries": []},
+    "zRanges": {"entries": []},
+    "effects": {"entries": []}
+  }
+}

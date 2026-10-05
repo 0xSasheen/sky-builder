@@ -1,0 +1,155 @@
+{
+  "note": "Expected outputs of the sky-tool math. uvRange rounded to 4 dp, mappingX to 2 dp. k values here are pre-rounding; compute from heightDeg or k as given.",
+  "cases": [
+    {
+      "name": "hero 40.5deg, bottom 3",
+      "mode": "tilted",
+      "image": [
+        1063,
+        1502
+      ],
+      "heightDeg": 40.5,
+      "k": 0.368919,
+      "bottomDeg": 3,
+      "expected": {
+        "uvRange": {
+          "minU": 0.4565,
+          "minV": 0.6578,
+          "maxU": 0.5435,
+          "maxV": 0.8422
+        },
+        "mappingX": 23.25,
+        "widthDeg": 29.3,
+        "topDeg": 43.5
+      }
+    },
+    {
+      "name": "1.5x of 40.5, bottom -15",
+      "mode": "tilted",
+      "image": [
+        1063,
+        1502
+      ],
+      "heightDeg": 57.9185,
+      "k": 0.553379,
+      "bottomDeg": -15,
+      "expected": {
+        "uvRange": {
+          "minU": 0.4347,
+          "minV": 0.6117,
+          "maxU": 0.5653,
+          "maxV": 0.8883
+        },
+        "mappingX": 13.96,
+        "widthDeg": 42.8,
+        "topDeg": 42.9
+      }
+    },
+    {
+      "name": "CURRENTLY IN USE: 1.5x then 1.15x, bottom -10",
+      "mode": "tilted",
+      "image": [
+        1063,
+        1502
+      ],
+      "heightDeg": 64.9442,
+      "k": 0.636386,
+      "bottomDeg": -10,
+      "expected": {
+        "uvRange": {
+          "minU": 0.4249,
+          "minV": 0.5909,
+          "maxU": 0.5751,
+          "maxV": 0.9091
+        },
+        "mappingX": 22.47,
+        "widthDeg": 48.5,
+        "topDeg": 54.9
+      }
+    },
+    {
+      "name": "1.5x then 1.5x, bottom -5",
+      "mode": "tilted",
+      "image": [
+        1063,
+        1502
+      ],
+      "heightDeg": 79.39,
+      "k": 0.830069,
+      "bottomDeg": -5,
+      "expected": {
+        "uvRange": {
+          "minU": 0.4021,
+          "minV": 0.5425,
+          "maxU": 0.5979,
+          "maxV": 0.9575
+        },
+        "mappingX": 34.7,
+        "widthDeg": 60.9,
+        "topDeg": 74.4
+      }
+    },
+    {
+      "name": "60deg, bottom 0",
+      "mode": "tilted",
+      "image": [
+        1063,
+        1502
+      ],
+      "heightDeg": 60.0,
+      "k": 0.57735,
+      "bottomDeg": 0,
+      "expected": {
+        "uvRange": {
+          "minU": 0.4319,
+          "minV": 0.6057,
+          "maxU": 0.5681,
+          "maxV": 0.8943
+        },
+        "mappingX": 30.0,
+        "widthDeg": 44.5,
+        "topDeg": 60.0
+      }
+    },
+    {
+      "name": "wall mode, 1063x1502",
+      "mode": "wall",
+      "image": [
+        1063,
+        1502
+      ],
+      "bottomDeg": 3.0,
+      "topFaceT": 0.95,
+      "expected": {
+        "uvRange": {
+          "minU": 0.4471,
+          "minV": 0.5125,
+          "maxU": 0.5529,
+          "maxV": 0.7369
+        },
+        "mappingX": 0.0,
+        "heightDeg": 40.5
+      }
+    },
+    {
+      "name": "wall mode, 3396x4000",
+      "mode": "wall",
+      "image": [
+        3396,
+        4000
+      ],
+      "bottomDeg": 3.0,
+      "topFaceT": 0.95,
+      "expected": {
+        "uvRange": {
+          "minU": 0.4365,
+          "minV": 0.5125,
+          "maxU": 0.5635,
+          "maxV": 0.7369
+        },
+        "mappingX": 0.0,
+        "heightDeg": 40.5
+      }
+    }
+  ]
+}

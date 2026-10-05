@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "type": "nuit:multi-textured",
+  "properties": {
+    "layer": 3,
+    "blend": "normal",
+    "fade": { "duration": 24000, "keyFrames": {} },
+    "rotation": {
+      "speed": 1.0,
+      "mapping": {"0": [22.47, 0.0, 0.0]},
+      "axis": {"0": [0.0, 0.0, 0.0]},
+      "skyboxRotation": false
+    },
+    "sunSkyTint": false,
+    "visibleUnderwater": true
+  },
+  "conditions": {
+    "worlds": {"entries": ["minecraft:overworld"]}
+  },
+  "animatableTextures": [
+    {
+      "texture": "sasheen:textures/sky/hero.png",
+      "uvRange": {"minU": 0.4249, "minV": 0.5909, "maxU": 0.5751, "maxV": 0.9091},
+      "gridColumns": 1,
+      "gridRows": 1
+    }
+  ]
+}
