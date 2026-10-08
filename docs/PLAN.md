@@ -1,7 +1,7 @@
 # Sky Builder: implementation plan
 
-Status: **M0. All questions answered (2026-10-04); decisions are in section 11. Waiting for the go-ahead to start M1.**
-No source code has been written yet.
+Status: **M1 done (2026-10-08), on branch `m1-math`.** Math, JSON and face tests pass (`npx vitest run`). Next: M2.
+Decisions are in section 11.
 
 Contents: 1. Source verification · 2. Architecture · 3. Types · 4. `math.ts` API and tests ·
 5. JSON output · 6. Rendering · 7. Time spin · 8. UI · 9. Milestones ·
@@ -184,7 +184,7 @@ The suggested layout from BRIEF §11 is kept, plus one module (`spin` lives in `
 
 ```
 src/
-  constants.ts   SIGN_MAPPING_X/Y, SUN_ANGLE_BEZIER, defaults, slider ranges, limits, fixed JSON values
+  constants.ts   SIGN_MAPPING_X/Y, SUN_ANGLE_BEZIER, FACES (the §3 face table), defaults, slider ranges, limits, fixed JSON values
   math.ts        pure functions: §6 forward and inverse, rounding, readouts, constraints, spin, fade
   schema.ts      TypeScript types for sky3_image.json and the tool state (types only, no code)
   json.ts        buildSky3(state) -> Sky3Json; serializeSky3 (exact §5 bytes); parseSky3 (import)

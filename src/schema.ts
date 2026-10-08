@@ -36,6 +36,21 @@ export interface Sky3Json {
   animatableTextures: [AnimatableTexture];
 }
 
+// --- Cube faces (BRIEF §3) ----------------------------------------------------
+
+export type FaceName = 'bottom' | 'top' | 'south' | 'west' | 'north' | 'east';
+
+/** A point at face coordinates (s, t) ∈ [−1, 1]² lies at centre + s·right + t·up. */
+export interface FaceDef {
+  name: FaceName;
+  /** Atlas cell: column 0–2 left to right, row 0–1 top to bottom. */
+  col: number;
+  row: number;
+  centre: Vec3;
+  right: Vec3;
+  up: Vec3;
+}
+
 // --- Tool state --------------------------------------------------------------
 
 export type HeroMode = 'tilted' | 'wall';

@@ -1,5 +1,7 @@
 // Constants shared by the math, the JSON builder and the preview.
-// No imports: everything else depends on this file.
+// Type imports only: everything else depends on this file.
+
+import type { FaceDef } from './schema.ts';
 
 // --- Mapping signs (CLAUDE.md rule 6) ---------------------------------------
 // Multiplied into the Three.js Euler: new Euler(SIGN_MAPPING_X·X, SIGN_MAPPING_Y·Y, 0, 'ZYX').
@@ -9,6 +11,19 @@
 export const SIGN_MAPPING_X = 1;
 /** Pending in-game check A (PLAN §10): source says +Y turns the hero toward west. */
 export const SIGN_MAPPING_Y = 1;
+
+// --- Cube faces (BRIEF §3) ---------------------------------------------------
+// From reference/sky_convert.py; checked against Nuit's MATRIX4F_ROTATED_FACE by tests/faces.test.ts.
+// right × up = −centre for every face, so each face's front side looks inward.
+
+export const FACES: readonly FaceDef[] = [
+  { name: 'bottom', col: 0, row: 0, centre: [0, -1, 0], right: [1, 0, 0], up: [0, 0, -1] },
+  { name: 'top', col: 1, row: 0, centre: [0, 1, 0], right: [1, 0, 0], up: [0, 0, 1] },
+  { name: 'south', col: 2, row: 0, centre: [0, 0, 1], right: [-1, 0, 0], up: [0, 1, 0] },
+  { name: 'west', col: 0, row: 1, centre: [-1, 0, 0], right: [0, 0, -1], up: [0, 1, 0] },
+  { name: 'north', col: 1, row: 1, centre: [0, 0, -1], right: [1, 0, 0], up: [0, 1, 0] },
+  { name: 'east', col: 2, row: 1, centre: [1, 0, 0], right: [0, 0, 1], up: [0, 1, 0] },
+];
 
 // --- Time (BRIEF §3, §4.7) ---------------------------------------------------
 
