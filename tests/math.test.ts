@@ -1,37 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import vectors from '../reference/test-vectors.json';
-import { DEFAULTS } from '../src/constants.ts';
 import {
   analyse, aspectFromUv, faceToNorthUv, heightFromK, kFromHeight, northUvToFace, noonBearingDeg,
   recoverParams, roundTo, scaleK, solveHero, sunAngleDeg, tiltedMappingX, tiltedUv,
   ticksToClock, uvRangeToFaceRect, wallUv,
 } from '../src/math.ts';
-import type { HeroParams, UvRange } from '../src/schema.ts';
+import { cases, params } from './vectors.ts';
 
-interface TestCase {
-  name: string;
-  mode: 'tilted' | 'wall';
-  image: number[];
-  heightDeg?: number;
-  k?: number;
-  bottomDeg: number;
-  topFaceT?: number;
-  expected: { uvRange: UvRange; mappingX: number; widthDeg?: number; topDeg?: number; heightDeg?: number };
-}
-
-const cases = vectors.cases as TestCase[];
 const tilted = cases.filter((c) => c.mode === 'tilted');
 const wall = cases.filter((c) => c.mode === 'wall');
 /** BRIEF §7 specifies cases 1 and 5 by β; cases 2–4 must be driven from k (case 4 is a rounding tie via β). */
 const BETA_CASES = [cases[0], cases[4]];
-
-function params(c: TestCase, overrides: Partial<HeroParams>): HeroParams {
-  return {
-    mode: c.mode, imageW: c.image[0], imageH: c.image[1], k: 0, bottomDeg: c.bottomDeg,
-    wallTopT: c.topFaceT ?? DEFAULTS.wallTopT, mappingYDeg: 0, texture: DEFAULTS.texture,
-    layer: DEFAULTS.layer, ...overrides,
-  };
-}
 
 describe('tilted mode (BRIEF §6.1, §7)', () => {
   for (const c of tilted) {

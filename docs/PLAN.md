@@ -409,11 +409,23 @@ that fills in the editable fields:
 - Strings (`texture`) go through `JSON.stringify(s)` for correct escaping.
 - Output ends with `}\n`, matching the pack file.
 
-`buildSky3(hero)` = `solveHero` + the fixed values from `constants.ts`.
-`parseSky3(text)` returns `{ json, recovered, warnings, errors }`. It accepts any `multi-textured`
-file with one animatable texture and one mapping keyframe, and reports anything that export will
-normalise (speed, axis, skyboxRotation, a non-zero Z, a top-level `blend`, extra keyframes). It
-also provides the `hero.png.mcmeta` string: `{"texture": {"blur": true, "clamp": true}}`.
+`makeSky3(uv, mapping, texture, layer)` assembles a full object from the editable fields plus the fixed
+values in `constants.ts`; `buildSky3(hero)` = `solveHero` + `makeSky3`.
+
+`parseSky3(text)` returns `{ ok: true, json, recovered, warnings }` or `{ ok: false, errors }`, collecting every
+problem rather than stopping at the first.
+- **Errors** (nothing imported): invalid JSON, a `type` other than `nuit:multi-textured`, no texture entry,
+  a missing or non-numeric `uvRange`, a `uvRange` that is empty or outside the North cell (with a 1e-4
+  tolerance for 4 dp rounding), or a mapping keyframe that isn't three numbers.
+- **Warnings** (imported, but export changes it): every fixed field that differs (schemaVersion, blend, fade,
+  speed, skyboxRotation, sunSkyTint, visibleUnderwater, conditions, grid size), a missing `axis` (the layer
+  would not spin), a top-level `blend`, a non-zero Z, extra mapping keyframes or texture entries, unknown
+  fields that export drops, and a `uvRange` that fits neither mode.
+- `json` keeps the imported `uvRange` and mapping exactly (pinned); `recovered` adds `texture` and `layer`
+  to `recoverParams`.
+
+`HERO_MCMETA` is the same bytes as the pack's `hero.png.mcmeta` (multi-line; same content as
+`{"texture": {"blur": true, "clamp": true}}`), and `mcmetaFileName(texture)` names the download after the texture.
 
 ---
 
