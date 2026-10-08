@@ -310,13 +310,20 @@ export interface AppState {
   pinned: boolean;                     // true until the first slider change after import
 }
 
+export interface FaceRect { s0: number; s1: number; t0: number; t1: number; }  // on the North face
+
 export interface Readouts {
-  aspect: number; k: number; ak: number;
+  rect: FaceRect;
+  aspect: number; k: number; ak: number;   // k = (t1 − t0)/2, ak = (s1 − s0)/2
   heightDeg: number; widthDeg: number; topDeg: number; bottomDeg: number;
   margins: { k: number; ak: number; zenithDeg: number };   // distance to each limit
   warnings: Warning[];
 }
-export type Warning = { code: 'k' | 'ak' | 'zenith' | 'outsideCell' | 'notCentred'; message: string };
+export type Warning = {
+  code: 'k' | 'ak' | 'zenith' | 'outsideCell' | 'notCentred';
+  level: 'warn' | 'error';                 // amber past 0.95; red outside the cell or over the zenith
+  message: string;
+};
 ```
 
 $k$ is stored instead of β because the scale buttons multiply $k$ (§6.1), and repeated ×/÷ then
@@ -342,8 +349,8 @@ All angles in the API are in **degrees**. Conversion to radians happens inside e
 | `roundTo(x, dp)` | number | `Math.round(x·10^dp)/10^dp`, plus `+0` to turn −0 into 0 |
 | `roundUv(uv)` | `UvRange` | 4 dp each |
 | `solveHero(p: HeroParams)` | `{ uv, mapping: Vec3 }`, **rounded** | dispatches on mode; mapping $= [\text{round}_2 X,\ \text{round}_2 Y,\ 0]$ |
-| `analyse(uv, mappingX, aspect?)` | `Readouts` | inverse (§6.3) on the rounded uv; if `aspect` is omitted, uses `aspectFromUv(uv)` |
-| `checkConstraints(r)` | `Warning[]` | $k \le 0.95$, $ak \le 0.95$, $X + \beta/2 < 90°$, inside north cell, centred |
+| `analyse(uv, mappingX, aspect?)` | `Readouts` | inverse (§6.3) on the rounded uv; if `aspect` is omitted, uses `aspectFromUv(uv)`. Height $= \arctan t_1 - \arctan t_0$; top/bottom $= X + \arctan t_{1,0}$; width $= 2\arctan\!\big(ak/\sqrt{1+t_c^2}\big)$ with $t_c = (t_0+t_1)/2$. In tilted mode these reduce to BRIEF §6.1 step 7 |
+| `checkConstraints(r)` | `Warning[]` | on the face rect: $\max\lvert t\rvert \le 0.95$ (`k`), $\max\lvert s\rvert \le 0.95$ (`ak`), $\le 1$ (`outsideCell`), top $< 90°$ (`zenith`), centred in $s$ (`notCentred`). In tilted mode the first two are exactly $k \le 0.95$, $ak \le 0.95$. A value exactly on 0.95 (wall mode's default $t_t$) is allowed |
 | `classifyUv(uv, mappingX)` | `'tilted' \| 'wall' \| 'custom'` | tilted if centred in $s$ and $t$; wall if centred in $s$ and X = 0 |
 | `recoverParams(uv, mapping)` | `Partial<HeroParams>` | tilted: $k = 2(\text{maxV} - \text{minV})$, $b = X - \beta/2$; wall: $t_t$, $b = \arctan t_b$ |
 | `aspectFromUv(uv)` | $a$ | $ak = 3(\text{maxU} - \text{minU})$ and $k = 2(\text{maxV} - \text{minV})$, so $a = \dfrac{3(\text{maxU} - \text{minU})}{2(\text{maxV} - \text{minV})}$ |
@@ -351,7 +358,7 @@ All angles in the API are in **degrees**. Conversion to radians happens inside e
 | `cubicBezier(x1, y1, x2, y2, p)` | eased progress | §1.3 steps 2–4 (bisection on $x(s) = p$, 50 iterations) |
 | `sunAngleDeg(T)` | θ | $360°\cdot\text{cubicBezier}(\ldots\text{SUN\_ANGLE\_BEZIER}, \operatorname{frac}((T-6000)/24000))$ |
 | `noonBearingDeg(mappingY)` | compass bearing, clockwise from north | $-Y$ wrapped to (−180, 180], for the "faces N 30° W at noon" readout |
-| `fadeAlpha(keyFrames, T, duration)` | α | port of Nuit's `findClosestKeyframes` + `calculateInterpolatedAlpha` (stretch: crossfade) |
+| `fadeAlpha(keyFrames, T, duration)` | α | port of Nuit's `findClosestKeyframes` + `calculateInterpolatedAlpha`. **Deferred to the crossfade stretch goal** (not in M1) |
 
 The `aspectFromUv` derivation, step by step:
 the hero spans $s \in [-ak, ak]$, so its width in $s$ is $2ak$. Since $s = 6(u - \tfrac13) - 1$,
