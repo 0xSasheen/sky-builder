@@ -51,6 +51,9 @@ export const MAPPING_DECIMALS = 2;
 
 // --- Defaults and slider ranges (BRIEF §8) -----------------------------------
 
+/** Look controls stop short of straight up and down (BRIEF §9). */
+export const PITCH_LIMIT_DEG = 89;
+
 export const DEFAULTS = {
   imageW: 1063,
   imageH: 1502,
@@ -62,6 +65,9 @@ export const DEFAULTS = {
   layer: 3,
   timeTicks: NOON_TICK,
   fovDeg: 70,
+  /** The view opens looking north at the horizon. */
+  yawDeg: 0,
+  pitchDeg: 0,
 } as const;
 
 export const RANGES = {
@@ -70,6 +76,8 @@ export const RANGES = {
   mappingYDeg: { min: -180, max: 180 },
   timeTicks: { min: 0, max: TICKS_PER_DAY - 1 },
   fovDeg: { min: 30, max: 110 },
+  yawDeg: { min: -180, max: 180 },
+  pitchDeg: { min: -PITCH_LIMIT_DEG, max: PITCH_LIMIT_DEG },
 } as const;
 
 export const SCALE_FACTORS = [1.15, 1.5] as const;

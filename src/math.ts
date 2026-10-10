@@ -2,10 +2,10 @@
 // All angles in this API are degrees; conversion to radians happens inside each function.
 
 import {
-  CENTRE_TOLERANCE, FACE_HARD_LIMIT, FACE_WARN_LIMIT, MAPPING_DECIMALS, NOON_TICK,
+  CENTRE_TOLERANCE, FACE_HARD_LIMIT, FACE_WARN_LIMIT, MAPPING_DECIMALS, NOON_TICK, PITCH_LIMIT_DEG,
   SIGN_MAPPING_Y, SUN_ANGLE_BEZIER, TICKS_PER_DAY, UV_DECIMALS, ZENITH_DEG,
 } from './constants.ts';
-import type { FaceRect, HeroParams, Readouts, UvRange, Vec3, Warning } from './schema.ts';
+import type { AtlasLayout, FaceRect, HeroParams, Readouts, UvRange, Vec3, Warning } from './schema.ts';
 
 const DEG = Math.PI / 180;
 /** Slack for comparisons against limits, so values that round onto a limit don't trip it. */
@@ -23,6 +23,10 @@ export function mod(a: number, n: number): number {
 export function wrapDeg180(deg: number): number {
   const r = mod(deg + 180, 360) - 180;
   return (r === -180 ? 180 : r) + 0; // + 0 turns −0 into 0
+}
+
+export function clamp(x: number, lo: number, hi: number): number {
+  return Math.min(hi, Math.max(lo, x));
 }
 
 // --- Size ---------------------------------------------------------------------
@@ -245,4 +249,35 @@ export function sunAngleDeg(ticks: number): number {
 /** Compass bearing at noon (clockwise from north) for a raw mapping Y. Negative = west of north. */
 export function noonBearingDeg(mappingYDeg: number): number {
   return wrapDeg180(-SIGN_MAPPING_Y * mappingYDeg);
+}
+
+// --- View (BRIEF §9) ---------------------------------------------------------------
+
+export function clampPitch(pitchDeg: number): number {
+  return clamp(pitchDeg, -PITCH_LIMIT_DEG, PITCH_LIMIT_DEG);
+}
+
+/**
+ * The yaw and pitch Minecraft's F3 screen shows for a view, so the preview can be matched in game.
+ * Minecraft's yaw is 0 facing south and grows clockwise (west = 90), so it is the bearing minus 180°.
+ * Its pitch is positive looking down.
+ */
+export function mcYawPitch(bearingDeg: number, pitchDeg: number): { yaw: number; pitch: number } {
+  return { yaw: wrapDeg180(bearingDeg - 180), pitch: -pitchDeg + 0 };
+}
+
+/** The "Facing" word on Minecraft's F3 screen: the nearest of the four compass directions. */
+export function mcFacing(bearingDeg: number): 'north' | 'east' | 'south' | 'west' {
+  return (['north', 'east', 'south', 'west'] as const)[mod(Math.floor(bearingDeg / 90 + 0.5), 4)];
+}
+
+// --- Atlas (BRIEF §2, §8) ------------------------------------------------------------
+
+/**
+ * A sky atlas is a 3 × 2 grid of square faces, so it must be exactly 3:2 (2W = 3H).
+ * That also makes H even and W = 3·(H/2), so the face size W/3 is always a whole number.
+ */
+export function atlasLayout(width: number, height: number): AtlasLayout {
+  if (width > 0 && 2 * width === 3 * height) return { ok: true, faceSize: width / 3 };
+  return { ok: false, message: `A sky atlas must be exactly 3:2 (3 faces wide, 2 high); this image is ${width} × ${height}.` };
 }

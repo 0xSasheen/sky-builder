@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  analyse, aspectFromUv, faceToNorthUv, heightFromK, kFromHeight, northUvToFace, noonBearingDeg,
-  recoverParams, roundTo, scaleK, solveHero, sunAngleDeg, tiltedMappingX, tiltedUv,
+  analyse, aspectFromUv, atlasLayout, clampPitch, faceToNorthUv, heightFromK, kFromHeight, mcFacing, mcYawPitch,
+  northUvToFace, noonBearingDeg, recoverParams, roundTo, scaleK, solveHero, sunAngleDeg, tiltedMappingX, tiltedUv,
   ticksToClock, uvRangeToFaceRect, wallUv,
 } from '../src/math.ts';
 import { cases, params } from './vectors.ts';
@@ -203,5 +203,44 @@ describe('time (BRIEF §3, §4.7)', () => {
     expect(noonBearingDeg(-180)).toBe(180);
     expect(noonBearingDeg(180)).toBe(180);
     expect(noonBearingDeg(0)).toBe(0);
+  });
+});
+
+describe('view (BRIEF §9)', () => {
+  it('pitch is clamped to ±89°', () => {
+    expect(clampPitch(95)).toBe(89);
+    expect(clampPitch(-120)).toBe(-89);
+    expect(clampPitch(22.47)).toBe(22.47);
+  });
+
+  it("matches Minecraft's F3 yaw: 0 = south, 90 = west, ±180 = north", () => {
+    expect(mcYawPitch(0, 0)).toEqual({ yaw: 180, pitch: 0 });
+    expect(mcYawPitch(90, 0).yaw).toBe(-90); // east
+    expect(mcYawPitch(180, 0).yaw).toBe(0); // south
+    expect(mcYawPitch(-90, 0).yaw).toBe(90); // west
+    expect(mcYawPitch(-30, 0).yaw).toBe(150); // PLAN §10 check A: hero 30° west of north
+  });
+
+  it("matches Minecraft's F3 pitch: positive looks down", () => {
+    expect(mcYawPitch(0, 22.47).pitch).toBe(-22.47);
+    expect(Object.is(mcYawPitch(0, 0).pitch, 0)).toBe(true); // not −0
+  });
+
+  it('names the facing like F3, nearest of four', () => {
+    expect([0, 44.9, 45, 90, 180, -90, -135, 180].map(mcFacing))
+      .toEqual(['north', 'north', 'east', 'east', 'south', 'west', 'west', 'south']);
+  });
+});
+
+describe('atlas layout (BRIEF §8)', () => {
+  it('accepts exactly 3:2 and gives the face size', () => {
+    expect(atlasLayout(1536, 1024)).toEqual({ ok: true, faceSize: 512 });
+    expect(atlasLayout(8190, 5460)).toEqual({ ok: true, faceSize: 2730 });
+  });
+
+  it('rejects anything else, naming the actual size', () => {
+    expect(atlasLayout(1537, 1024)).toEqual({ ok: false, message: expect.stringContaining('1537 × 1024') });
+    expect(atlasLayout(1024, 1024).ok).toBe(false);
+    expect(atlasLayout(0, 0).ok).toBe(false);
   });
 });

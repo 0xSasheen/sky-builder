@@ -75,11 +75,17 @@ export interface HeroParams {
 export interface ViewState {
   timeTicks: number;
   playing: boolean;
+  /** Vertical field of view, as in Minecraft's FOV setting. */
   fovDeg: number;
+  /** Compass bearing of the view, clockwise from north (east = +90), in (−180, 180]. */
   yawDeg: number;
+  /** Elevation of the view; positive looks up. Clamped to ±PITCH_LIMIT_DEG. */
   pitchDeg: number;
   showOverlay: boolean;
 }
+
+/** The atlas cell grid, or why the image can't be one (BRIEF §8). */
+export type AtlasLayout = { ok: true; faceSize: number } | { ok: false; message: string };
 
 export interface AppState {
   hero: HeroParams;
