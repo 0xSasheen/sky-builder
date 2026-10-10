@@ -1,7 +1,7 @@
 # Sky Builder: implementation plan
 
-Status: **M1 done (2026-10-08), on branch `m1-math`.** Math, JSON and face tests pass (`npx vitest run`). Next: M2.
-Decisions are in section 11.
+Status: **M1 done (2026-10-08), merged to `main`. M2 done (2026-10-10), on branch `m2-sky`**, awaiting review.
+Next: M3. Decisions are in section 11.
 
 Contents: 1. Source verification · 2. Architecture · 3. Types · 4. `math.ts` API and tests ·
 5. JSON output · 6. Rendering · 7. Time spin · 8. UI · 9. Milestones ·
@@ -175,6 +175,22 @@ world $y = -z$. So $v = \tfrac12$ is $t = +1$, and $t = 1 - 4(v - \tfrac12)$. �
   So **tests for cases 2–4 drive from `k`**, and only cases 1 and 5 also test the β path.
 - The brief's §5 example is byte-identical to `reference/pack-example/.../sky3_image.json`.
   That file ends with a single trailing `\n`, and the serialiser will match it.
+  `.gitattributes` forces LF on checkout, so Git for Windows (`core.autocrlf=true`) can't break that test.
+
+### 1.6 Texture sampling (checked 2026-10-10, for M2)
+
+`NuitRenderBackend.drawTextured` binds `abstractTexture.getSampler()`, the texture's own sampler from
+Minecraft's `TextureManager`. `SkyboxManager.registerTextures` loads every Nuit texture as a vanilla
+`SimpleTexture` (`registerAndLoad(id, new SimpleTexture(id))`). So filtering follows vanilla's `.mcmeta` rules:
+a texture without `"blur": true` is sampled with **nearest** filtering and no mipmaps. Vanilla 26.2 uses the
+same mechanism for its own non-atlas textures (`textures/misc/vignette.png.mcmeta` and
+`enchanted_glint_item.png.mcmeta` are `{"texture": {"blur": true}}`, from misode/mcmeta `26.2-assets`).
+
+- **Sky atlases** have no `.mcmeta`, so the preview uses `NearestFilter` with no mipmaps, like the game.
+- **The hero** is loaded the same way, so `hero.png.mcmeta` (`blur: true`) **is applied**, and M3 uses linear
+  filtering. This answers BRIEF §12.5 from source; check B in section 10 becomes an optional confirmation.
+- Minecraft decodes PNGs with stb_image, which ignores colour-profile chunks (`iCCP`, `gAMA`). The preview decodes with
+  `createImageBitmap(file, { colorSpaceConversion: 'none' })` to match. Nothing leaves the browser.
 
 ---
 
@@ -196,6 +212,7 @@ tests/
   math.test.ts   test vectors §7, scaling, inverse, round trip, spin, constraints
   json.test.ts   byte-for-byte §5 for case 3, import/parse cases
   faces.test.ts  Nuit face matrices vs our face table; hero placement (uses three, not the DOM)
+  view.test.ts   scene.ts's face meshes and view.ts's camera: the M2 checks, done geometrically
 ```
 
 Module dependencies (arrows mean "imports"):
@@ -359,6 +376,10 @@ All angles in the API are in **degrees**. Conversion to radians happens inside e
 | `sunAngleDeg(T)` | θ | $360°\cdot\text{cubicBezier}(\ldots\text{SUN\_ANGLE\_BEZIER}, \operatorname{frac}((T-6000)/24000))$ |
 | `noonBearingDeg(mappingY)` | compass bearing, clockwise from north | $-Y$ wrapped to (−180, 180], for the "faces N 30° W at noon" readout |
 | `fadeAlpha(keyFrames, T, duration)` | α | port of Nuit's `findClosestKeyframes` + `calculateInterpolatedAlpha`. **Deferred to the crossfade stretch goal** (not in M1) |
+| `clamp(x, lo, hi)`, `clampPitch(p)` | number | pitch limited to ±`PITCH_LIMIT_DEG` (89°). Added in M2 |
+| `mcYawPitch(bearing, pitch)` | F3 `{yaw, pitch}` | yaw $= \text{wrap}(\varphi - 180°)$ (Minecraft: 0 = south, 90 = west); pitch $= -p$ (Minecraft: positive looks down). Added in M2 |
+| `mcFacing(bearing)` | `'north' \| …` | nearest of four, like F3's "Facing". Added in M2 |
+| `atlasLayout(W, H)` | face size, or an error message | requires $2W = 3H$. Added in M2 |
 
 The `aspectFromUv` derivation, step by step:
 the hero spans $s \in [-ak, ak]$, so its width in $s$ is $2ak$. Since $s = 6(u - \tfrac13) - 1$,
@@ -458,11 +479,13 @@ For each face, the plane's local axes are set from the face table:
    `Matrix4.makeBasis(r, u, n).setPosition(c)` places the plane. `side: FrontSide`.
 4. Texture: crop the cell $(col, row)$ of the atlas into its own canvas ($F\times F$, $F = W/3$) and make a
    `CanvasTexture`. With `flipY` (the default), the canvas's top row maps to the plane's $+y$, which is $\mathbf u$,
-   so image row 0 is at $t = +1$ as §3 requires. `ClampToEdgeWrapping`, `MeshBasicMaterial`, `depthWrite: false`.
-   No `CubeTexture` and no `scene.background`.
+   so image row 0 is at $t = +1$ as §3 requires. `ClampToEdgeWrapping`, `MeshBasicMaterial`, `depthWrite: false`,
+   `NearestFilter` with no mipmaps (section 1.6). No `CubeTexture` and no `scene.background`.
 5. Colour: every texture uses `colorSpace = NoColorSpace`, and the renderer uses
    `outputColorSpace = LinearSRGBColorSpace`. Nothing is converted, so blending happens on the raw
-   (gamma-encoded) PNG values, as in Minecraft.
+   (gamma-encoded) PNG values, as in Minecraft. `ColorManagement.enabled = false`, so overlay colours written
+   as CSS hex are used as is too.
+6. `facePlacement(face)` in `scene.ts` builds the matrix; `view.test.ts` checks it against the table.
 
 ### Hero
 
@@ -474,8 +497,13 @@ The hero is redrawn only when `applyJson` sees a changed uv or mapping.
 ### Camera and look controls (`view.ts`)
 
 `camera.rotation.set(pitch, yaw, 0, 'YXZ')`. Three.js yaw is counter-clockwise from above, so
-"compass bearing clockwise from north" $\phi$ maps to `yaw = −φ`. Dragging right increases $\phi$.
-Pitch is clamped to ±89°. "Look at hero" computes the hero centre's world direction
+"compass bearing clockwise from north" $\phi$ maps to `yaw = −φ`. `ViewState.yawDeg` stores $\phi$.
+Dragging right increases $\phi$ and dragging up looks up, like the mouse in Minecraft, at
+(vertical FOV ÷ canvas height) degrees per pixel. Pitch is clamped to ±89°.
+
+M2 also adds bearing, pitch and FOV sliders with number boxes, so exact views (such as the M3 check at pitch 22.47°)
+can be typed in. A crosshair marks the centre of the view, and a readout shows the bearing and pitch plus what
+Minecraft's F3 screen would show for the same view (`mcYawPitch`, `mcFacing`), for lining the preview up with the game. "Look at hero" computes the hero centre's world direction
 $\mathbf d = \text{Spin}\cdot M\cdot(0, t_c, -1)$ and sets $\phi = \operatorname{atan2}(d_x, -d_z)$, pitch $= \arcsin(d_y/|\mathbf d|)$.
 FOV is **vertical** in both Three.js and Minecraft, so the slider value is passed through as is.
 
@@ -486,6 +514,10 @@ FOV is **vertical** in both Three.js and Minecraft, so the slider value is passe
    turning right goes E → S → W with continuous horizon lines and matching edge letters).
 3. An optional overlay draws the cube edges and face labels from the table itself, independent of the
    texture, so a texture/table mismatch shows up as a label disagreeing with the painted letters.
+   It has two parts. The **magenta** part (cube edges, and "north · cell 1,1"-style labels at $t = -0.5$) sits in
+   `spinGroup` and turns with the sky. The **cyan** part is fixed to the world: the horizon ring, faint rings every
+   10° of elevation, the four meridians, N/E/S/W letters, and elevation labels up the north meridian.
+   Every overlay object uses `depthTest: false` and `renderOrder` 20, above the hero's 10.
 4. M3: test card with case 3 at θ = 0, yaw 0, pitch 22.47°: an upright card centred on screen, TOP at the top,
    L on the left, bottom edge 10° below the horizon. The overlay draws a horizon ring and a 10° tick to check against.
 
@@ -510,9 +542,11 @@ Import by paste or file).
 
 - Each slider has a linked `<input type=number>`. One helper, `bindRange(el, num, get, set)`, keeps the pair
   in sync. It works like a small Java listener class registered on both inputs.
-- The atlas loader checks $2W = 3H$ exactly and rejects anything else with the actual size in the message. It warns if
-  $W \bmod 3 \ne 0$. The default atlas is `reference/samples/placeholder_atlas.png`, bundled through a Vite asset import.
-- Images load through `URL.createObjectURL`. Nothing leaves the browser.
+- The atlas loader checks $2W = 3H$ exactly and rejects anything else with the actual size in the message, keeping the
+  previous atlas. (The planned "$W \bmod 3 \ne 0$" warning was dropped: $2W = 3H$ already makes $H$ even and
+  $W = 3 \cdot \tfrac{H}{2}$, so it can never fire.) The default atlas is `reference/samples/placeholder_atlas.png`,
+  bundled through a Vite asset import.
+- Images are decoded with `createImageBitmap` (section 1.6) instead of `URL.createObjectURL`. Nothing leaves the browser.
 - Warnings appear inline next to readouts (amber at 0.95, red at 1.0 or the zenith).
 
 ---
@@ -553,7 +587,7 @@ Only two things are left that the source can't settle. Both use the working pack
 
 Optional sanity check of the spin: with Y = 0, `/time set 18000` (midnight) should put the hero due **south**.
 
-**B. `hero.png.mcmeta`** (BRIEF §12.5)
+**B. `hero.png.mcmeta`** (BRIEF §12.5). *Optional since 2026-10-10: the source says it is applied (section 1.6).*
 
 Look at the hero through a **spyglass**, which magnifies it enough to see individual texture pixels. Then
 temporarily rename `hero.png.mcmeta` and press F3+T. If the image goes from smooth to blocky, crisp pixels,
