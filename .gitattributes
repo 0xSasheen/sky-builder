@@ -1,0 +1,4 @@
+# Check out text files with LF on every OS. tests/json.test.ts compares the generated
+# JSON byte for byte with files in reference/, so they must not gain CRLF on Windows.
+* text=auto eol=lf
+*.png binary
