@@ -4,10 +4,55 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>sky-builder</title>
+    <title>Sky Builder</title>
   </head>
   <body>
-    <div id="app"></div>
+    <main class="app">
+      <div class="viewport" id="viewport">
+        <canvas id="sky" aria-label="Sky preview. Drag to look around."></canvas>
+        <div class="crosshair" aria-hidden="true"></div>
+        <div class="hud" id="hud"></div>
+      </div>
+
+      <aside class="panel">
+        <h1>Sky Builder</h1>
+
+        <section>
+          <h2>Files</h2>
+          <label class="field">
+            <span>Sky atlas (3:2)</span>
+            <input type="file" id="atlas-file" accept="image/png,image/*" />
+          </label>
+          <p class="status" id="atlas-status" role="status"></p>
+        </section>
+
+        <section>
+          <h2>Preview</h2>
+          <div class="field range">
+            <label for="yaw">Bearing</label>
+            <input type="range" id="yaw" step="0.1" />
+            <input type="number" id="yaw-num" step="0.1" aria-label="Bearing in degrees" />
+          </div>
+          <div class="field range">
+            <label for="pitch">Pitch</label>
+            <input type="range" id="pitch" step="0.1" />
+            <input type="number" id="pitch-num" step="0.1" aria-label="Pitch in degrees" />
+          </div>
+          <div class="field range">
+            <label for="fov">FOV</label>
+            <input type="range" id="fov" step="1" />
+            <input type="number" id="fov-num" step="1" aria-label="Field of view in degrees" />
+          </div>
+          <div class="buttons">
+            <button type="button" id="look-north">Look north at the horizon</button>
+          </div>
+          <label class="check">
+            <input type="checkbox" id="overlay" />
+            <span>Overlay: cube edges and face table (magenta), horizon and compass (cyan)</span>
+          </label>
+        </section>
+      </aside>
+    </main>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
