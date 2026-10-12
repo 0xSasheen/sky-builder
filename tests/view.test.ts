@@ -2,12 +2,15 @@
 // The face table itself is checked against Nuit in faces.test.ts; this checks that the meshes and
 // camera use it correctly. Only the texture on each plane is left to the visual check.
 
-import { PerspectiveCamera, Vector3 } from 'three';
+import { Matrix4, PerspectiveCamera, Vector3 } from 'three';
 import { describe, expect, it } from 'vitest';
 import { FACES } from '../src/constants.ts';
-import { facePlacement } from '../src/scene.ts';
+import { buildSky3 } from '../src/json.ts';
+import { heroPieces } from '../src/math.ts';
+import { facePlacement, heroGeometry, heroMappingEuler } from '../src/scene.ts';
 import type { FaceName } from '../src/schema.ts';
 import { applyCameraView } from '../src/view.ts';
+import { cases, params } from './vectors.ts';
 
 const face = (name: FaceName) => FACES.find((f) => f.name === name)!;
 
@@ -76,5 +79,48 @@ describe('BRIEF §14 M2 checks, geometrically', () => {
       const next = ring[(i + 1) % 4];
       for (const t of [-1, 0, 1]) expect(meshPoint(name, 1, t).distanceTo(meshPoint(next, -1, t))).toBeLessThan(1e-12);
     });
+  });
+});
+
+describe('BRIEF §14 M3 check, geometrically', () => {
+  // Case 3, time 6000 (θ = 0), camera at bearing 0 and pitch 22.47°.
+  const json = buildSky3(params(cases[2]));
+  const geometry = heroGeometry(heroPieces(json.animatableTextures[0].uvRange));
+  const mapping = new Matrix4().makeRotationFromEuler(heroMappingEuler(json.properties.rotation.mapping['0']));
+  const camera = new PerspectiveCamera(70, 16 / 9, 0.01, 10);
+  applyCameraView(camera, 0, 22.47, 70);
+
+  const pos = geometry.getAttribute('position');
+  const uv = geometry.getAttribute('uv');
+  // heroGeometry writes bottom-left, bottom-right, top-right, top-left.
+  const corner = (i: number) => {
+    const p = new Vector3(pos.getX(i), pos.getY(i), pos.getZ(i)).applyMatrix4(mapping);
+    const s = p.clone().project(camera);
+    return { world: p, x: s.x, y: s.y, u: uv.getX(i), v: uv.getY(i) };
+  };
+  const [bl, br, tr, tl] = [0, 1, 2, 3].map(corner);
+  const close = (a: number, b: number): void => expect(Math.abs(a - b)).toBeLessThan(1e-6); // 32-bit geometry
+
+  it('is an upright rectangle centred on screen', () => {
+    close(tl.y, tr.y); // top edge level
+    close(bl.y, br.y); // bottom edge level
+    close(tl.x, bl.x); // left edge vertical
+    close(tr.x, br.x); // right edge vertical
+    close(tl.x, -tr.x); // centred left to right
+    close(tl.y, -bl.y); // centred top to bottom: the camera looks straight at the tilted face
+  });
+
+  it('shows the image upright: TOP at the top, L on the left', () => {
+    // Three.js v = 1 is the top of the (flipped) image, so the top-left corner shows the image's top-left.
+    expect([tl.u, tl.v]).toEqual([0, 1]);
+    expect([br.u, br.v]).toEqual([1, 0]);
+    expect(tl.y).toBeGreaterThan(bl.y);
+    expect(tl.x).toBeLessThan(tr.x);
+  });
+
+  it('has its bottom edge 10° below the horizon', () => {
+    const mid = bl.world.clone().add(br.world).multiplyScalar(0.5);
+    const elevation = (Math.asin(mid.y / mid.length()) * 180) / Math.PI;
+    expect(Math.abs(elevation - -10)).toBeLessThan(0.01);
   });
 });

@@ -3,10 +3,11 @@
 
 import { Euler, Matrix4, Quaternion, Vector3 } from 'three';
 import { describe, expect, it } from 'vitest';
-import { FACES, SIGN_MAPPING_X, SIGN_MAPPING_Y } from '../src/constants.ts';
+import { FACES } from '../src/constants.ts';
 import { buildSky3 } from '../src/json.ts';
-import { sunAngleDeg, uvRangeToFaceRect } from '../src/math.ts';
-import type { FaceName, Sky3Json } from '../src/schema.ts';
+import { applyMapping, heroPieces, sunAngleDeg, tiltedUv, uvRangeToFaceRect } from '../src/math.ts';
+import { heroGeometry, heroMappingEuler } from '../src/scene.ts';
+import type { FaceName, Sky3Json, UvRange, Vec3 } from '../src/schema.ts';
 import { cases, params } from './vectors.ts';
 
 const DEG = Math.PI / 180;
@@ -72,10 +73,9 @@ function ourFacePoint(name: FaceName, s: number, t: number): Vector3 {
     .addScaledVector(new Vector3(...f.up), t);
 }
 
-/** heroGroup's rotation: Euler(sx·X, sy·Y, 0, 'ZYX'), the matrix Rz·Ry·Rx (rule 4). */
+/** heroGroup's rotation, exactly as scene.ts sets it. */
 function heroGroupMatrix(json: Sky3Json): Matrix4 {
-  const [x, y] = json.properties.rotation.mapping['0'];
-  return new Matrix4().makeRotationFromEuler(new Euler(SIGN_MAPPING_X * x * DEG, SIGN_MAPPING_Y * y * DEG, 0, 'ZYX'));
+  return new Matrix4().makeRotationFromEuler(heroMappingEuler(json.properties.rotation.mapping['0']));
 }
 
 const elevationDeg = (v: Vector3): number => Math.asin(v.y / v.length()) / DEG;
@@ -179,5 +179,56 @@ describe('hero placement (BRIEF §9, M3 check)', () => {
     const spin = new Matrix4().makeRotationY(sunAngleDeg(18000) * DEG);
     const world = new Vector3(0, 0, -1).applyMatrix4(heroGroupMatrix(case3)).applyMatrix4(spin);
     expect(Math.abs(bearingDeg(world))).toBeCloseTo(180, 6);
+  });
+});
+
+describe('hero geometry vs Nuit (BRIEF §4.1–4.3, PLAN §12)', () => {
+  /**
+   * Nuit's MultiTexturedSkybox: on each face, the overlap of the uvRange with the face's cell, drawn at
+   * nuitVertex, with texture coordinates mapped from the uvRange onto (0, 0)–(1, 1). Checked against the
+   * geometry scene.ts builds, before the mapping rotation.
+   */
+  function expectMatchesNuit(json: UvRange): void {
+    const pieces = heroPieces(json);
+    // UVRange.CODEC clamps each value to [0, 1] as it reads the JSON (CodecUtils.getClampedFloat).
+    const clamp01 = (x: number): number => Math.min(1, Math.max(0, x));
+    const uv = { minU: clamp01(json.minU), minV: clamp01(json.minV), maxU: clamp01(json.maxU), maxV: clamp01(json.maxV) };
+    const geometry = heroGeometry(pieces);
+    const pos = geometry.getAttribute('position');
+    const tex = geometry.getAttribute('uv');
+    // The geometry holds 32-bit floats (about 7 significant digits), so compare at that precision.
+    pieces.forEach((piece, i) => {
+      const [minU, minV, maxU, maxV] = NUIT_TEXTURE_FACES[piece.face];
+      const u0 = Math.max(uv.minU, minU);
+      const u1 = Math.min(uv.maxU, maxU);
+      const v0 = Math.max(uv.minV, minV);
+      const v1 = Math.min(uv.maxV, maxV);
+      // scene.ts writes each quad as bottom-left, bottom-right, top-right, top-left (V = 0 is the top).
+      const corners: [number, number][] = [[u0, v1], [u1, v1], [u1, v0], [u0, v0]];
+      corners.forEach(([u, v], j) => {
+        const k = 4 * i + j;
+        expectVecClose(new Vector3(pos.getX(k), pos.getY(k), pos.getZ(k)).multiplyScalar(100), nuitVertex(piece.face, u, v), 4);
+        // Nuit's texture v runs down from the image's top; Three.js's runs up, on the flipped image.
+        expect(tex.getX(k)).toBeCloseTo((u - uv.minU) / (uv.maxU - uv.minU), 6);
+        expect(1 - tex.getY(k)).toBeCloseTo((v - uv.minV) / (uv.maxV - uv.minV), 6);
+      });
+    });
+  }
+
+  it('case 3 (one piece on North)', () => expectMatchesNuit(cases[2].expected.uvRange));
+  it('a hero spilling onto Top', () => expectMatchesNuit(tiltedUv(1063 / 1502, 1.2)));
+  it('a wide hero spilling onto West and East', () => expectMatchesNuit(tiltedUv(2, 0.7)));
+  it('a range across four cells', () => expectMatchesNuit({ minU: 0.2, minV: 0.3, maxU: 0.5, maxV: 0.9 }));
+
+  it("math.applyMapping (used by 'look at hero') matches Nuit and the scene", () => {
+    for (const mapping of [[22.47, 0, 0], [30, -45, 0], [-12.5, 170, 33]] as Vec3[]) {
+      const nuit = new Matrix4().makeRotationFromQuaternion(nuitMapping(...mapping));
+      const scene = new Matrix4().makeRotationFromEuler(heroMappingEuler(mapping));
+      for (const v of [[0, 0, -1], [0.3, -0.6, -1], [1, 0, 0]] as Vec3[]) {
+        const ours = new Vector3(...applyMapping(v, mapping));
+        expectVecClose(ours, new Vector3(...v).applyMatrix4(nuit), 12);
+        expectVecClose(ours, new Vector3(...v).applyMatrix4(scene), 12);
+      }
+    }
   });
 });

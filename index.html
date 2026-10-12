@@ -24,6 +24,63 @@
             <input type="file" id="atlas-file" accept="image/png,image/*" />
           </label>
           <p class="status" id="atlas-status" role="status"></p>
+          <label class="field">
+            <span>Hero image</span>
+            <input type="file" id="hero-file" accept="image/png,image/*" />
+          </label>
+          <p class="status" id="hero-status" role="status"></p>
+          <div class="field size">
+            <label for="image-w">Size (px)</label>
+            <input type="number" id="image-w" min="1" step="1" aria-label="Hero width in pixels" />
+            <span>×</span>
+            <input type="number" id="image-h" min="1" step="1" aria-label="Hero height in pixels" />
+          </div>
+        </section>
+
+        <section>
+          <h2>Hero</h2>
+          <div class="field modes" role="radiogroup" aria-label="Mode">
+            <label><input type="radio" name="mode" value="tilted" /> Tilted</label>
+            <label><input type="radio" name="mode" value="wall" /> Wall</label>
+          </div>
+          <div class="field range" data-mode="tilted">
+            <label for="height">Height β</label>
+            <input type="range" id="height" step="0.01" />
+            <input type="number" id="height-num" step="0.01" aria-label="Angular height in degrees" />
+          </div>
+          <div class="field range" data-mode="tilted">
+            <label for="k-num">k</label>
+            <span class="hint">tan(β/2), half-height on the face</span>
+            <input type="number" id="k-num" step="0.0001" aria-label="k" />
+          </div>
+          <div class="buttons" data-mode="tilted" aria-label="Scale">
+            <button type="button" data-scale="1.5" data-divide title="Divide k by 1.5">÷1.5</button>
+            <button type="button" data-scale="1.15" data-divide title="Divide k by 1.15">÷1.15</button>
+            <button type="button" data-scale="1.15" title="Multiply k by 1.15">×1.15</button>
+            <button type="button" data-scale="1.5" title="Multiply k by 1.5">×1.5</button>
+          </div>
+          <div class="field range" data-mode="wall">
+            <label for="wall-top">Top t<sub>t</sub></label>
+            <input type="range" id="wall-top" step="0.01" />
+            <input type="number" id="wall-top-num" step="0.01" aria-label="Top edge on the face" />
+          </div>
+          <div class="field range">
+            <label for="bottom">Bottom b</label>
+            <input type="range" id="bottom" step="0.1" />
+            <input type="number" id="bottom-num" step="0.01" aria-label="Bottom edge elevation in degrees" />
+          </div>
+          <div class="field range">
+            <label for="turn">Turn ψ</label>
+            <input type="range" id="turn" step="0.1" />
+            <input type="number" id="turn-num" step="0.01" aria-label="Mapping Y in degrees" />
+          </div>
+          <p class="hint" id="turn-hint"></p>
+        </section>
+
+        <section>
+          <h2>Readouts</h2>
+          <dl class="readouts" id="readouts"></dl>
+          <ul class="warnings" id="warnings" aria-live="polite"></ul>
         </section>
 
         <section>
@@ -44,12 +101,32 @@
             <input type="number" id="fov-num" step="1" aria-label="Field of view in degrees" />
           </div>
           <div class="buttons">
+            <button type="button" id="look-hero">Look at hero</button>
             <button type="button" id="look-north">Look north at the horizon</button>
           </div>
           <label class="check">
             <input type="checkbox" id="overlay" />
             <span>Overlay: cube edges and face table (magenta), horizon and compass (cyan)</span>
           </label>
+        </section>
+
+        <section>
+          <h2>Output</h2>
+          <label class="field">
+            <span>Texture</span>
+            <input type="text" id="texture" spellcheck="false" autocomplete="off" />
+          </label>
+          <p class="status error" id="texture-problem" role="status"></p>
+          <div class="field range">
+            <label for="layer">Layer</label>
+            <span class="hint">draw order; the sky layers are 1 and 2</span>
+            <input type="number" id="layer" step="1" />
+          </div>
+        </section>
+
+        <section>
+          <h2>sky3_image.json</h2>
+          <pre class="json" id="json-out" tabindex="0" aria-label="Generated sky3_image.json"></pre>
         </section>
       </aside>
     </main>

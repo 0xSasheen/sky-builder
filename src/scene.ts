@@ -1,19 +1,22 @@
-// Three.js preview (BRIEF §9, PLAN §6): the sky cube, the spin group and the overlay.
-// The hero arrives in M3; it will go in spinGroup next to the sky faces.
+// Three.js preview (BRIEF §9, PLAN §6): the sky cube, the hero, the spin group and the overlay.
+// The hero is built only from the JSON object (rule 3), the same values Nuit reads.
 
 import {
-  BoxGeometry, BufferGeometry, CanvasTexture, ClampToEdgeWrapping, ColorManagement, EdgesGeometry, Float32BufferAttribute,
-  Group, Line, LinearSRGBColorSpace, LineBasicMaterial, LineLoop, LineSegments, Matrix4, Mesh, MeshBasicMaterial, NearestFilter,
-  NoColorSpace, PerspectiveCamera, PlaneGeometry, Scene, Sprite, SpriteMaterial, Vector3, WebGLRenderer,
+  BoxGeometry, BufferGeometry, CanvasTexture, ClampToEdgeWrapping, ColorManagement, DoubleSide, EdgesGeometry, Euler,
+  Float32BufferAttribute, Group, Line, LinearFilter, LinearSRGBColorSpace, LineBasicMaterial, LineLoop, LineSegments,
+  Matrix4, Mesh, MeshBasicMaterial, NearestFilter, NoColorSpace, PerspectiveCamera, PlaneGeometry, Scene, Sprite,
+  SpriteMaterial, Texture, Vector3, WebGLRenderer,
 } from 'three';
-import { FACES } from './constants.ts';
-import type { FaceDef, FaceName, ViewState } from './schema.ts';
+import { FACES, SIGN_MAPPING_X, SIGN_MAPPING_Y } from './constants.ts';
+import { heroPieces } from './math.ts';
+import type { FaceDef, FaceName, HeroPiece, Sky3Json, Vec3, ViewState } from './schema.ts';
 import { applyCameraView } from './view.ts';
 
 const DEG = Math.PI / 180;
 
-/** Draw order: sky first, then the hero (M3), then the overlay on top. */
+/** Draw order: sky first, then the hero, then the overlay on top. */
 const ORDER_SKY = 0;
+const ORDER_HERO = 10;
 const ORDER_OVERLAY = 20;
 
 /** Overlay colours: magenta moves with the sky (it comes from the face table), cyan is fixed to the world. */
@@ -35,6 +38,36 @@ export function facePlacement(face: FaceDef): Matrix4 {
   return new Matrix4().makeBasis(right, up, normal).setPosition(...face.centre);
 }
 
+/** heroGroup's rotation for a JSON mapping [X, Y, Z]: Euler order 'ZYX' is the matrix R_z·R_y·R_x (rule 4). */
+export function heroMappingEuler([x, y, z]: Vec3): Euler {
+  return new Euler(SIGN_MAPPING_X * x * DEG, SIGN_MAPPING_Y * y * DEG, z * DEG, 'ZYX');
+}
+
+/**
+ * One quad per piece (math.heroPieces), on its cube face, before the mapping rotation.
+ * Texture coordinates use Three.js's convention (v = 1 at the top of the image), because the image
+ * is flipped when it is decoded (main.ts), as flipY would do for an ordinary image.
+ */
+export function heroGeometry(pieces: readonly HeroPiece[]): BufferGeometry {
+  const positions: number[] = [];
+  const uvs: number[] = [];
+  const indices: number[] = [];
+  for (const { face: name, rect, tex } of pieces) {
+    const face = FACES.find((f) => f.name === name)!;
+    const at = (s: number, t: number): number[] =>
+      [0, 1, 2].map((i) => face.centre[i] + s * face.right[i] + t * face.up[i]);
+    const base = positions.length / 3;
+    // Bottom-left, bottom-right, top-right, top-left: counter-clockwise seen from inside the cube.
+    positions.push(...at(rect.s0, rect.t0), ...at(rect.s1, rect.t0), ...at(rect.s1, rect.t1), ...at(rect.s0, rect.t1));
+    uvs.push(tex.u0, 1 - tex.v1, tex.u1, 1 - tex.v1, tex.u1, 1 - tex.v0, tex.u0, 1 - tex.v0);
+    indices.push(base, base + 1, base + 2, base, base + 2, base + 3);
+  }
+  return new BufferGeometry()
+    .setAttribute('position', new Float32BufferAttribute(positions, 3))
+    .setAttribute('uv', new Float32BufferAttribute(uvs, 2))
+    .setIndex(indices);
+}
+
 export class SkyScene {
   readonly camera = new PerspectiveCamera(70, 1, 0.01, 10);
   private readonly renderer: WebGLRenderer;
@@ -42,6 +75,14 @@ export class SkyScene {
   /** Turned by the daily spin Y(θ) (BRIEF §4.5); holds everything that moves with the sky. */
   private readonly spinGroup = new Group();
   private readonly faces = new Map<FaceName, Mesh<PlaneGeometry, MeshBasicMaterial>>();
+  /** Nuit's per-layer mapping M (BRIEF §4.5), applied before the spin. */
+  private readonly heroGroup = new Group();
+  private readonly hero = new Mesh(new BufferGeometry(), new MeshBasicMaterial({
+    // Nuit's "normal" blend is SRC_ALPHA, ONE_MINUS_SRC_ALPHA on the raw texture, times (1, 1, 1, 1):
+    // Three.js's NormalBlending with premultipliedAlpha false. Nuit's shader also discards alpha = 0,
+    // which looks the same under this blend. Nuit turns culling off, hence DoubleSide.
+    transparent: true, depthTest: false, depthWrite: false, side: DoubleSide,
+  }));
   private readonly skyOverlay = new Group();
   private readonly worldOverlay = new Group();
   private renderQueued = false;
@@ -63,6 +104,12 @@ export class SkyScene {
       this.faces.set(face.name, mesh);
       this.spinGroup.add(mesh);
     }
+
+    this.hero.renderOrder = ORDER_HERO;
+    this.hero.name = 'hero';
+    this.hero.visible = false; // until there is both an image and a JSON
+    this.heroGroup.add(this.hero);
+    this.spinGroup.add(this.heroGroup);
 
     buildSkyOverlay(this.skyOverlay);
     buildWorldOverlay(this.worldOverlay);
@@ -98,6 +145,45 @@ export class SkyScene {
       material.color.set('#ffffff');
       material.needsUpdate = true; // the shader changes when a map is added
     }
+    this.requestRender();
+  }
+
+  /**
+   * The hero image, decoded already flipped, without premultiplied alpha and without colour conversion
+   * (main.ts). WebGL can't flip or premultiply an ImageBitmap on upload, so both flags stay false.
+   */
+  setHeroImage(image: ImageBitmap): void {
+    const texture = new Texture(image);
+    texture.flipY = false;
+    texture.premultiplyAlpha = false;
+    texture.colorSpace = NoColorSpace;
+    // hero.png.mcmeta is {"blur": true, "clamp": true}, and Minecraft applies it (BRIEF §4.8).
+    texture.magFilter = texture.minFilter = LinearFilter;
+    texture.generateMipmaps = false;
+    texture.wrapS = texture.wrapT = ClampToEdgeWrapping;
+    texture.needsUpdate = true;
+
+    const material = this.hero.material;
+    const old = material.map;
+    material.map = texture;
+    material.needsUpdate = true;
+    if (old) {
+      old.dispose();
+      (old.image as ImageBitmap).close();
+    }
+    this.updateHeroVisibility();
+  }
+
+  /** Builds the hero from the JSON object alone: its uvRange and its mapping (rule 3). */
+  applyJson(json: Sky3Json): void {
+    this.hero.geometry.dispose();
+    this.hero.geometry = heroGeometry(heroPieces(json.animatableTextures[0].uvRange));
+    this.heroGroup.rotation.copy(heroMappingEuler(json.properties.rotation.mapping['0']));
+    this.updateHeroVisibility();
+  }
+
+  private updateHeroVisibility(): void {
+    this.hero.visible = this.hero.material.map !== null && this.hero.geometry.index !== null && this.hero.geometry.index.count > 0;
     this.requestRender();
   }
 
