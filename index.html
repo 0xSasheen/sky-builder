@@ -19,11 +19,26 @@
 
         <section>
           <h2>Files</h2>
-          <label class="field">
-            <span>Sky atlas (3:2)</span>
-            <input type="file" id="atlas-file" accept="image/png,image/*" />
-          </label>
-          <p class="status" id="atlas-status" role="status"></p>
+          <div class="field">
+            <label for="sky-file">Sky</label>
+            <div class="sky-row">
+              <select id="sky-type" aria-label="Sky file type">
+                <option value="auto">Auto (by shape)</option>
+                <option value="atlas">Atlas (3:2)</option>
+                <option value="panorama">Panorama (2:1)</option>
+              </select>
+              <input type="file" id="sky-file" accept="image/png,image/*" />
+            </div>
+          </div>
+          <p class="status" id="sky-status" role="status"></p>
+          <div class="field range" id="pano-options" hidden>
+            <label for="face-size">Face size</label>
+            <span class="hint">px per cube face; the atlas is 3 × 2 faces</span>
+            <input type="number" id="face-size" step="1" aria-label="Face size in pixels" />
+          </div>
+          <div class="buttons" id="pano-download" hidden>
+            <button type="button" id="download-atlas">Download atlas (PNG)</button>
+          </div>
           <label class="field">
             <span>Hero image</span>
             <input type="file" id="hero-file" accept="image/png,image/*" />

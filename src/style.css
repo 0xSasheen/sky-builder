@@ -107,6 +107,8 @@ h2 {
 
 .field {
   display: grid;
+  /* minmax(0, …) lets wide content (a file picker) shrink instead of widening the panel. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 4px;
   margin-bottom: 8px;
 }
@@ -201,6 +203,28 @@ input[type='range'] {
 
 input[type='file'] {
   max-width: 100%;
+  min-width: 0;
+  font: inherit;
+}
+
+.sky-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+/* The file picker shrinks to fit beside the type dropdown instead of widening the panel. */
+.sky-row input[type='file'] {
+  flex: 1 1 0;
+  overflow: hidden;
+}
+
+select {
+  padding: 3px 6px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
   font: inherit;
 }
 

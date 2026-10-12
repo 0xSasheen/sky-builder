@@ -1,9 +1,9 @@
 // Controls and readouts, in plain DOM (PLAN §8). The UI never changes state itself:
 // it reports what the user did through the handlers, and main.ts calls show*() with the result.
 
-import { FACE_WARN_LIMIT, K_RANGE, RANGES } from './constants.ts';
+import { FACE_WARN_LIMIT, K_RANGE, PANO_FACE_RANGE, RANGES } from './constants.ts';
 import { heightFromK, kFromHeight, mcFacing, mcYawPitch, noonBearingDeg, quadrantBearing } from './math.ts';
-import type { HeroMode, HeroParams, Readouts, Sky3Json, ViewState } from './schema.ts';
+import type { HeroMode, HeroParams, Readouts, Sky3Json, SkyType, ViewState } from './schema.ts';
 
 export interface UiHandlers {
   onView(patch: Partial<ViewState>): void;
@@ -11,7 +11,12 @@ export interface UiHandlers {
   /** A scale button: multiply k by this factor (BRIEF §6.1). */
   onScale(factor: number): void;
   onLookAtHero(): void;
-  onAtlasFile(file: File): void;
+  onSkyFile(file: File): void;
+  /** The sky type dropdown: auto, atlas or panorama (PLAN §13.4). */
+  onSkyType(type: SkyType): void;
+  /** A new face size for a panorama's atlas, committed with Enter or by leaving the box. */
+  onFaceSize(faceSize: number): void;
+  onDownloadAtlas(): void;
   onHeroFile(file: File): void;
 }
 
@@ -94,7 +99,11 @@ export class Ui {
   private readonly setLayer: (v: number) => void;
   private readonly overlay = byId<HTMLInputElement>('overlay');
   private readonly hud = byId<HTMLDivElement>('hud');
-  private readonly atlasStatus = byId<HTMLParagraphElement>('atlas-status');
+  private readonly skyStatus = byId<HTMLParagraphElement>('sky-status');
+  private readonly skyType = byId<HTMLSelectElement>('sky-type');
+  private readonly panoOptions = byId<HTMLDivElement>('pano-options');
+  private readonly faceSize = byId<HTMLInputElement>('face-size');
+  private readonly panoDownload = byId<HTMLDivElement>('pano-download');
   private readonly heroStatus = byId<HTMLParagraphElement>('hero-status');
   private readonly modes = [...document.querySelectorAll<HTMLInputElement>('input[name="mode"]')];
   private readonly modeRows = [...document.querySelectorAll<HTMLElement>('[data-mode]')];
@@ -115,13 +124,21 @@ export class Ui {
     byId('look-hero').addEventListener('click', () => handlers.onLookAtHero());
 
     // --- Files
-    for (const [id, handler] of [['atlas-file', handlers.onAtlasFile], ['hero-file', handlers.onHeroFile]] as const) {
+    for (const [id, handler] of [['sky-file', handlers.onSkyFile], ['hero-file', handlers.onHeroFile]] as const) {
       const input = byId<HTMLInputElement>(id);
       input.addEventListener('change', () => {
         const file = input.files?.[0];
         if (file) handler(file);
       });
     }
+    this.skyType.addEventListener('change', () => handlers.onSkyType(this.skyType.value as SkyType));
+    this.faceSize.min = String(PANO_FACE_RANGE.min);
+    this.faceSize.max = String(PANO_FACE_RANGE.max);
+    // 'change', not 'input': a conversion takes seconds, so don't start one on every keystroke.
+    this.faceSize.addEventListener('change', () => {
+      if (Number.isFinite(this.faceSize.valueAsNumber)) handlers.onFaceSize(this.faceSize.valueAsNumber);
+    });
+    byId('download-atlas').addEventListener('click', () => handlers.onDownloadAtlas());
     this.setImageW = bindNumber(byId('image-w'), 0, (imageW) => handlers.onHero({ imageW }));
     this.setImageH = bindNumber(byId('image-h'), 0, (imageH) => handlers.onHero({ imageH }));
 
@@ -214,9 +231,29 @@ export class Ui {
     this.jsonOut.textContent = jsonText;
   }
 
-  showAtlasStatus(text: string, isError = false): void {
-    this.atlasStatus.textContent = text;
-    this.atlasStatus.classList.toggle('error', isError);
+  showSkyStatus(text: string, isError = false): void {
+    this.skyStatus.textContent = text;
+    this.skyStatus.classList.toggle('error', isError);
+  }
+
+  /** The face size box, shown while the sky comes from a panorama; null hides it. */
+  showPanoramaOptions(faceSize: number | null): void {
+    this.panoOptions.hidden = faceSize === null;
+    if (faceSize !== null) this.faceSize.value = String(faceSize);
+  }
+
+  showAtlasDownload(visible: boolean): void {
+    this.panoDownload.hidden = !visible;
+  }
+
+  /** Saves a file through the browser's download, from memory; nothing is uploaded. */
+  download(blob: Blob, fileName: string): void {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = fileName;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000); // some browsers read the URL just after the click
   }
 
   showHeroStatus(text: string, isError = false): void {
