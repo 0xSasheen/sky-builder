@@ -33,6 +33,13 @@ export const NOON_TICK = 6000;
 /** `minecraft:visual/sun_angle` ease in vanilla 26.2 `timeline/day.json`, as [x1, y1, x2, y2]. */
 export const SUN_ANGLE_BEZIER = [0.362, 0.241, 0.638, 0.759] as const;
 
+// --- Panoramas (PLAN §13), the convention of reference/sky_convert.py --------
+
+/** Compass bearing of a panorama's left edge (its YAW0): the south-west cube corner. Strip reads W | N | E | S. */
+export const PANO_LEFT_BEARING_DEG = -135;
+/** Face sizes for a converted atlas. sky_convert.py refuses faces over 2730, as the atlas would pass 8192 px wide. */
+export const PANO_FACE_RANGE = { min: 16, max: 2730 } as const;
+
 // --- Constraints (BRIEF §6.1) ------------------------------------------------
 
 /** Past this, in face units, the hero is close to spilling into a neighbouring cell. */

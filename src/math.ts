@@ -2,10 +2,13 @@
 // All angles in this API are degrees; conversion to radians happens inside each function.
 
 import {
-  CENTRE_TOLERANCE, FACE_HARD_LIMIT, FACE_WARN_LIMIT, FACES, K_RANGE, MAPPING_DECIMALS, NOON_TICK, PITCH_LIMIT_DEG,
-  RANGES, SIGN_MAPPING_X, SIGN_MAPPING_Y, SUN_ANGLE_BEZIER, TICKS_PER_DAY, UV_DECIMALS, ZENITH_DEG,
+  CENTRE_TOLERANCE, FACE_HARD_LIMIT, FACE_WARN_LIMIT, FACES, K_RANGE, MAPPING_DECIMALS, NOON_TICK, PANO_FACE_RANGE,
+  PANO_LEFT_BEARING_DEG, PITCH_LIMIT_DEG, RANGES, SIGN_MAPPING_X, SIGN_MAPPING_Y, SUN_ANGLE_BEZIER, TICKS_PER_DAY,
+  UV_DECIMALS, ZENITH_DEG,
 } from './constants.ts';
-import type { AtlasLayout, FaceRect, HeroParams, HeroPiece, Readouts, UvRange, Vec3, Warning } from './schema.ts';
+import type {
+  AtlasLayout, FaceRect, HeroParams, HeroPiece, Readouts, RgbaImage, SkyKind, UvRange, Vec3, Warning,
+} from './schema.ts';
 
 const DEG = Math.PI / 180;
 /** Slack for comparisons against limits, so values that round onto a limit don't trip it. */
@@ -299,6 +302,100 @@ export function mcFacing(bearingDeg: number): 'north' | 'east' | 'south' | 'west
 export function atlasLayout(width: number, height: number): AtlasLayout {
   if (width > 0 && 2 * width === 3 * height) return { ok: true, faceSize: width / 3 };
   return { ok: false, message: `A sky atlas must be exactly 3:2 (3 faces wide, 2 high); this image is ${width} × ${height}.` };
+}
+
+// --- Panorama → atlas (PLAN §13), a port of reference/sky_convert.py's pano_to_atlas --------
+
+/** A 3:2 image is an atlas and a 2:1 image a panorama; anything else is neither. */
+export function skyKindFromSize(width: number, height: number): SkyKind | null {
+  if (width > 0 && 2 * width === 3 * height) return 'atlas';
+  if (width > 0 && width === 2 * height) return 'panorama';
+  return null;
+}
+
+/** A panorama must be exactly 2:1. The default face size is a quarter of its width (sky_convert.py: 8192 → 2048). */
+export function panoramaLayout(width: number, height: number): AtlasLayout {
+  if (width > 0 && width === 2 * height) {
+    return { ok: true, faceSize: clamp(Math.round(width / 4), PANO_FACE_RANGE.min, PANO_FACE_RANGE.max) };
+  }
+  return { ok: false, message: `A panorama must be exactly 2:1 (equirectangular); this image is ${width} × ${height}.` };
+}
+
+/**
+ * Where a direction lands on a W × H panorama, in pixel units with pixel centres on whole numbers
+ * (so it can be sampled directly). PLAN §13.2 steps 3–4:
+ * bearing λ = atan2(d_x, −d_z), elevation φ = asin(d_y / |d|),
+ * x = ((λ − λ0) mod 360) / 360 · W − ½,  y = (90 − φ) / 180 · H − ½.
+ */
+export function directionToPanorama(
+  d: Vec3, width: number, height: number, leftBearingDeg: number = PANO_LEFT_BEARING_DEG,
+): { x: number; y: number } {
+  return panoramaPoint(d[0], d[1], d[2], width, height, leftBearingDeg, { x: 0, y: 0 });
+}
+
+/** directionToPanorama, writing into `out` so the conversion loop allocates nothing per pixel. */
+function panoramaPoint(
+  dx: number, dy: number, dz: number, width: number, height: number, leftBearingDeg: number,
+  out: { x: number; y: number },
+): { x: number; y: number } {
+  const bearing = Math.atan2(dx, -dz) / DEG;
+  const elevation = Math.asin(clamp(dy / Math.sqrt(dx * dx + dy * dy + dz * dz), -1, 1)) / DEG;
+  out.x = (mod(bearing - leftBearingDeg, 360) / 360) * width - 0.5;
+  out.y = ((90 - elevation) / 180) * height - 0.5;
+  return out;
+}
+
+/**
+ * Builds a 3F × 2F atlas from an equirectangular panorama (PLAN §13.2). Each atlas pixel looks along
+ * c + s·r + t·u for its face and samples the panorama there, bilinearly: x wraps around, y is clamped.
+ * Matches sky_convert.py to within 1 per channel (it works in float32; tests/panorama.test.ts).
+ * onFace reports progress after each of the six faces.
+ */
+export function panoramaToAtlas(
+  pano: RgbaImage, faceSize: number, leftBearingDeg: number = PANO_LEFT_BEARING_DEG,
+  onFace?: (done: number, total: number) => void,
+): RgbaImage {
+  const { width: W, height: H, data: src } = pano;
+  const F = faceSize;
+  const outWidth = 3 * F;
+  // Writing a fraction into a Uint8ClampedArray clamps to 0–255 and rounds half to even, exactly like
+  // numpy's rint and clip in sky_convert.py (Java: (int) Math.rint, clamped).
+  const out = new Uint8ClampedArray(outWidth * 2 * F * 4);
+  const p = { x: 0, y: 0 };
+  FACES.forEach((face, n) => {
+    const [cx, cy, cz] = face.centre;
+    const [rx, ry, rz] = face.right;
+    const [ux, uy, uz] = face.up;
+    for (let j = 0; j < F; j++) {
+      const t = 1 - (2 * (j + 0.5)) / F; // row 0 is the top of the cell
+      for (let i = 0; i < F; i++) {
+        const s = (2 * (i + 0.5)) / F - 1;
+        // d = c + s·r + t·u
+        const { x, y } = panoramaPoint(cx + s * rx + t * ux, cy + s * ry + t * uy, cz + s * rz + t * uz,
+          W, H, leftBearingDeg, p);
+        const x0 = Math.floor(x);
+        const y0 = Math.floor(y);
+        const fx = x - x0;
+        const fy = y - y0;
+        const left = mod(x0, W);
+        const right = mod(x0 + 1, W);
+        const upper = clamp(y0, 0, H - 1);
+        const lower = clamp(y0 + 1, 0, H - 1);
+        const a = (upper * W + left) * 4;
+        const b = (upper * W + right) * 4;
+        const c = (lower * W + left) * 4;
+        const e = (lower * W + right) * 4;
+        const o = ((face.row * F + j) * outWidth + face.col * F + i) * 4;
+        for (let ch = 0; ch < 4; ch++) {
+          const top = src[a + ch] * (1 - fx) + src[b + ch] * fx;
+          const bottom = src[c + ch] * (1 - fx) + src[e + ch] * fx;
+          out[o + ch] = top * (1 - fy) + bottom * fy;
+        }
+      }
+    }
+    onFace?.(n + 1, FACES.length);
+  });
+  return { width: outWidth, height: 2 * F, data: out };
 }
 
 // --- Hero geometry, the way Nuit draws it (BRIEF §4.1–4.3) -----------------------------

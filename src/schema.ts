@@ -87,6 +87,18 @@ export interface ViewState {
 /** The atlas cell grid, or why the image can't be one (BRIEF §8). */
 export type AtlasLayout = { ok: true; faceSize: number } | { ok: false; message: string };
 
+/** What a sky file is. 'auto' (the upload default) decides from the shape: 3:2 is an atlas, 2:1 a panorama. */
+export type SkyKind = 'atlas' | 'panorama';
+export type SkyType = 'auto' | SkyKind;
+
+/** Raw pixels, laid out like the browser's ImageData: RGBA, 8 bits each, rows from the top. */
+export interface RgbaImage {
+  width: number;
+  height: number;
+  /** Backed by a plain ArrayBuffer, as `new ImageData(data, …)` requires. */
+  data: Uint8ClampedArray<ArrayBuffer>;
+}
+
 export interface AppState {
   hero: HeroParams;
   view: ViewState;
