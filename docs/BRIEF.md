@@ -282,6 +282,10 @@ Mapping X = 0. The hero stands upright on the North wall, off-centre.
 3. $\text{minU} = \tfrac13 + \tfrac{1-s}{6}$, $\text{maxU} = \tfrac13 + \tfrac{1+s}{6}$,
    $\text{minV} = \tfrac12 + \tfrac{1-t_t}{4}$, $\text{maxV} = \tfrac12 + \tfrac{1-t_b}{4}$.
 
+**Constraint, shown as an error:** $t_b < t_t$. If the bottom edge is at or above
+the top edge ($b \ge \arctan t_t$), the range is empty or reversed and Nuit draws
+nothing. The §6.1 cell limits apply here as well, to $\max(|t_b|, |t_t|)$ and $s$.
+
 ### 6.3 Inverse (for importing a JSON, and for rendering)
 
 From any `uvRange` inside the North cell:
@@ -372,12 +376,17 @@ to each constraint limit, and warnings when a §6.1 constraint is broken.
   as it does in Minecraft. This matters for semi-transparent hero edges and the
   crossfade. **Do not use `CubeTexture` or `scene.background`**:
   their conventions differ, and the face table is already verified.
-- **Hero:** a `PlaneGeometry` built with the inverse map (§6.3) from the
-  rounded JSON `uvRange`. It lies on the plane z = −1 (the North face), facing
-  +z toward the camera. Put it inside a `heroGroup` whose rotation is
+- **Hero:** built from the rounded JSON `uvRange` the way Nuit does it (§4.1):
+  clamp the range to [0, 1], then for each face draw the overlap with that
+  face's cell, using the inverse map (§6.3) for that cell. Inside the North cell
+  this is one quad on the plane z = −1, facing +z toward the camera; a range
+  that crosses a cell edge bends onto the next face, as it does in game. Put it
+  inside a `heroGroup` whose rotation is
   `new Euler(sx·X°, sy·Y°, 0, 'ZYX')` in radians, where sx and sy are the sign
   constants. Use `transparent: true`, `depthTest: false`, and a `renderOrder`
-  above the sky.
+  above the sky. Texture: linear filtering, no mipmaps, clamped (§4.8), with
+  straight (not premultiplied) alpha and normal blending, matching Nuit's
+  `normal` blend (`SRC_ALPHA, ONE_MINUS_SRC_ALPHA`).
 - **Spin:** put the sky planes and `heroGroup` together in a `spinGroup` whose
   y rotation is $+\theta(T)$ from §4.7. The world transform is then
   $\text{Spin} \cdot M \cdot \mathbf{v}$, matching §4.5.

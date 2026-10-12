@@ -1,7 +1,7 @@
 # Sky Builder: implementation plan
 
-Status: **M1 done (2026-10-08), merged to `main`. M2 done (2026-10-10), on branch `m2-sky`**, awaiting review.
-Next: M3. Decisions are in section 11.
+Status: **M1 and M2 done and merged to `main`. M3 done (2026-10-12), on branch `m3-hero`**, awaiting review.
+Next: M3½ (in-game check A), then M4. Decisions are in sections 11 and 12.
 
 Contents: 1. Source verification · 2. Architecture · 3. Types · 4. `math.ts` API and tests ·
 5. JSON output · 6. Rendering · 7. Time spin · 8. UI · 9. Milestones ·
@@ -212,7 +212,7 @@ tests/
   math.test.ts   test vectors §7, scaling, inverse, round trip, spin, constraints
   json.test.ts   byte-for-byte §5 for case 3, import/parse cases
   faces.test.ts  Nuit face matrices vs our face table; hero placement (uses three, not the DOM)
-  view.test.ts   scene.ts's face meshes and view.ts's camera: the M2 checks, done geometrically
+  view.test.ts   scene.ts's face meshes and view.ts's camera: the M2 and M3 checks, done geometrically
 ```
 
 Module dependencies (arrows mean "imports"):
@@ -380,6 +380,13 @@ All angles in the API are in **degrees**. Conversion to radians happens inside e
 | `mcYawPitch(bearing, pitch)` | F3 `{yaw, pitch}` | yaw $= \text{wrap}(\varphi - 180°)$ (Minecraft: 0 = south, 90 = west); pitch $= -p$ (Minecraft: positive looks down). Added in M2 |
 | `mcFacing(bearing)` | `'north' \| …` | nearest of four, like F3's "Facing". Added in M2 |
 | `atlasLayout(W, H)` | face size, or an error message | requires $2W = 3H$. Added in M2 |
+| `clampHero(p)` | `HeroParams` | k within `K_RANGE`, b, $t_t$ and ψ within their sliders, whole-pixel sizes, integer layer. Added in M3 |
+| `heroPieces(uv)` | `HeroPiece[]` | Nuit's face loop: clamp to [0, 1], then per face the overlap with its cell, as a face rect plus the image fraction it shows. Added in M3 |
+| `applyMapping(v, mapping)` | `Vec3` | $R_z R_y R_x \mathbf v$ with the sign constants. Added in M3 |
+| `atlasPointToCube(u, v)` | `Vec3` | $\mathbf c + s\mathbf r + t\mathbf u$ on the face whose cell holds $(u, v)$. Added in M3 |
+| `heroCentreDirection(uv, mapping, θ)` | `Vec3` | $Y(\theta)\,M\,\mathbf p$ for the middle of the range, for "Look at hero". Added in M3 |
+| `viewToward(d)` | `{yawDeg, pitchDeg}` | bearing $\operatorname{atan2}(d_x, -d_z)$, pitch $\operatorname{atan2}(d_y, \sqrt{d_x^2 + d_z^2})$, clamped. Added in M3 |
+| `quadrantBearing(b)` | `{from, deg, to}` | −30 → N 30° W, 150 → S 30° E, for the noon readout. Added in M3 |
 
 The `aspectFromUv` derivation, step by step:
 the hero spans $s \in [-ak, ak]$, so its width in $s$ is $2ak$. Since $s = 6(u - \tfrac13) - 1$,
@@ -489,10 +496,9 @@ For each face, the plane's local axes are set from the face table:
 
 ### Hero
 
-`uvRangeToFaceRect(json…uvRange)` gives $s_0, s_1, t_0, t_1$. A `PlaneGeometry(s_1 - s_0,\ t_1 - t_0)` is
-translated to $\left(\tfrac{s_0+s_1}{2},\ \tfrac{t_0+t_1}{2},\ -1\right)$. It already faces +z, toward the camera, so no extra
-rotation is needed. Full-image texture, `transparent: true`, `depthTest: false`, `renderOrder: 10`.
-The hero is redrawn only when `applyJson` sees a changed uv or mapping.
+*Revised in M3; see section 12.* The hero is built by `heroGeometry(heroPieces(uvRange))`, a port of Nuit's face loop.
+Inside the North cell it is the single quad on z = −1 described here before: $s \in [s_0, s_1]$, $t \in [t_0, t_1]$ from
+`uvRangeToFaceRect`, facing +z toward the camera. `transparent: true`, `depthTest: false`, `renderOrder: 10`.
 
 ### Camera and look controls (`view.ts`)
 
@@ -610,6 +616,41 @@ download is harmless but unnecessary.
 | 8 | Colour | No colour conversion (`NoColorSpace` + `LinearSRGBColorSpace`), matching Minecraft's gamma-space blending. |
 | 9 | Import | Pin the imported JSON. If the loaded image's aspect differs from the uvRange by more than 1%, **warn only**. |
 | 10 | BRIEF edits | Applied. |
+
+---
+
+## 12. M3 design notes (2026-10-12)
+
+**Checked in the Nuit source for M3:** `UVRange.CODEC` clamps each value to [0, 1] as it reads the JSON
+(`CodecUtils.getClampedFloat`, `Mth.clamp`). The textured shaders (`textured_skybox.fsh`, `multi_textured_skybox.fsh`)
+do `fragColor = texture(Sampler0, uv) * ColorModulator` and discard only `a == 0`. `Blend` "normal" is
+`SRC_ALPHA, ONE_MINUS_SRC_ALPHA` with `ColorModulator = (1, 1, 1, fadeAlpha)`, and the fade alpha is 1 for empty keyframes.
+
+1. **The hero is drawn the way Nuit draws it.** `math.heroPieces` ports the face loop: clamp the range, then for each
+   face, intersect it with the face's cell and map the overlap onto the face, showing the matching fraction of the
+   image. `scene.heroGeometry` makes one quad per piece. Inside the North cell this is exactly the old single quad.
+   Past the cell edge the preview shows the same bend as the game, rather than a flat card that the game would not
+   draw. `faces.test.ts` checks every vertex and texture coordinate against the port of Nuit's `nuitVertex`.
+2. **Hero texture.** Decoded with `createImageBitmap(file, {colorSpaceConversion: 'none', premultiplyAlpha: 'none',
+   imageOrientation: 'flipY'})`. WebGL can't flip or premultiply an ImageBitmap on upload, so the flip happens at
+   decode and `flipY` and `premultiplyAlpha` stay false. Linear filtering, no mipmaps and clamped edges come from
+   `hero.png.mcmeta` (section 1.6). `NormalBlending` with straight alpha is Nuit's "normal" blend. The `a == 0`
+   discard looks the same under that blend, so it isn't copied.
+3. **k range.** `K_RANGE` is $[\tan 2.5°,\ 1.5]$. The β slider (5°–87°) only shows k. The k box and the scale buttons
+   can go past it, so the 0.95 warning and the 1.0 error can actually be reached ($\beta = 87°$ is only
+   $k = 0.949$), and one ×1.5 step past the limit can be undone with ÷1.5.
+4. **A new error, `empty`**, for wall mode when $b \ge \arctan t_t$ (BRIEF §6.2). The size readouts show a dash then.
+5. **Readouts** show the reach on the face, $\max|t|$ and $\max|s|$, against the 0.95 limit, because that is what the
+   limit applies to. In tilted mode these equal $k$ and $ak$; in wall mode the top edge $t_t$ sets $\max|t|$. A value
+   on the limit (wall mode's default $t_t = 0.95$) reads "at the limit". In an error state where the range leaves
+   the North cell, the readouts still use the North-face inverse, so they are only indicative there; the error says so.
+6. **Look at hero** uses `heroCentreDirection` and `viewToward` in `math.ts`. These are pure, and `faces.test.ts`
+   checks `applyMapping` against Nuit's quaternion and `scene.heroMappingEuler`.
+7. **The live JSON panel** shows `serializeSky3(json)` from M3 on, read-only; Copy, Download and import arrive in M4.
+8. **Texture path check.** `json.textureProblem` flags a texture that isn't `namespace:path` with Minecraft's
+   allowed characters, or that doesn't end in `.png`. It is shown under the box and doesn't block anything.
+9. **Default hero** is `reference/samples/test_hero_1063x1502.png`. Loading an image fills in the W × H boxes,
+   which can then be overridden.
 
 ---
 
