@@ -71,14 +71,23 @@ export const DEFAULTS = {
 } as const;
 
 export const RANGES = {
+  /** The β slider. It only displays k, which may go past it (K_RANGE). */
   heightDeg: { min: 5, max: 87 },
   bottomDeg: { min: -30, max: 60 },
   mappingYDeg: { min: -180, max: 180 },
+  /** Wall mode's top edge t_t, in face units. */
+  wallTopT: { min: 0, max: 1 },
   timeTicks: { min: 0, max: TICKS_PER_DAY - 1 },
   fovDeg: { min: 30, max: 110 },
   yawDeg: { min: -180, max: 180 },
   pitchDeg: { min: -PITCH_LIMIT_DEG, max: PITCH_LIMIT_DEG },
 } as const;
+
+/**
+ * Allowed k = tan(β/2). The bottom is β = 5°. The top, 1.5, is past the cell edge (1.0), so the k box
+ * and scale buttons can reach the warnings, and one ×1.5 step past 0.95 can still be undone with ÷1.5.
+ */
+export const K_RANGE = { min: Math.tan((2.5 * Math.PI) / 180), max: 1.5 } as const;
 
 export const SCALE_FACTORS = [1.15, 1.5] as const;
 

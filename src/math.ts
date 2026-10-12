@@ -2,10 +2,10 @@
 // All angles in this API are degrees; conversion to radians happens inside each function.
 
 import {
-  CENTRE_TOLERANCE, FACE_HARD_LIMIT, FACE_WARN_LIMIT, MAPPING_DECIMALS, NOON_TICK, PITCH_LIMIT_DEG,
-  SIGN_MAPPING_Y, SUN_ANGLE_BEZIER, TICKS_PER_DAY, UV_DECIMALS, ZENITH_DEG,
+  CENTRE_TOLERANCE, FACE_HARD_LIMIT, FACE_WARN_LIMIT, FACES, K_RANGE, MAPPING_DECIMALS, NOON_TICK, PITCH_LIMIT_DEG,
+  RANGES, SIGN_MAPPING_X, SIGN_MAPPING_Y, SUN_ANGLE_BEZIER, TICKS_PER_DAY, UV_DECIMALS, ZENITH_DEG,
 } from './constants.ts';
-import type { AtlasLayout, FaceRect, HeroParams, Readouts, UvRange, Vec3, Warning } from './schema.ts';
+import type { AtlasLayout, FaceRect, HeroParams, HeroPiece, Readouts, UvRange, Vec3, Warning } from './schema.ts';
 
 const DEG = Math.PI / 180;
 /** Slack for comparisons against limits, so values that round onto a limit don't trip it. */
@@ -109,6 +109,20 @@ export function roundUv(uv: UvRange): UvRange {
   };
 }
 
+/** Keeps slider values in range: k within K_RANGE, whole-pixel image sizes, an integer layer. */
+export function clampHero(p: HeroParams): HeroParams {
+  return {
+    ...p,
+    imageW: Math.max(1, Math.round(p.imageW)),
+    imageH: Math.max(1, Math.round(p.imageH)),
+    k: clamp(p.k, K_RANGE.min, K_RANGE.max),
+    bottomDeg: clamp(p.bottomDeg, RANGES.bottomDeg.min, RANGES.bottomDeg.max),
+    wallTopT: clamp(p.wallTopT, RANGES.wallTopT.min, RANGES.wallTopT.max),
+    mappingYDeg: clamp(p.mappingYDeg, RANGES.mappingYDeg.min, RANGES.mappingYDeg.max),
+    layer: Math.round(p.layer),
+  };
+}
+
 /** Sliders → the rounded values that go into the JSON. */
 export function solveHero(p: HeroParams): { uv: UvRange; mapping: Vec3 } {
   const aspect = p.imageW / p.imageH;
@@ -159,6 +173,11 @@ export function analyse(uv: UvRange, mappingX: number, aspect: number = aspectFr
 
 /** BRIEF §6.1 constraints. Bottom edges below the horizon are allowed and not warned about. */
 export function checkConstraints(r: Readouts): Warning[] {
+  if (!(r.rect.t1 > r.rect.t0 && r.rect.s1 > r.rect.s0)) {
+    // Only wall mode can get here: a bottom edge b at or above the top edge t_t (BRIEF §6.2).
+    return [{ code: 'empty', level: 'error',
+      message: 'The hero has no height: its bottom edge is at or above its top edge, so Nuit draws nothing.' }];
+  }
   const warnings: Warning[] = [];
   const hardMargin = FACE_HARD_LIMIT - FACE_WARN_LIMIT;
   if (r.margins.k < -hardMargin - EPS || r.margins.ak < -hardMargin - EPS) {
@@ -280,4 +299,92 @@ export function mcFacing(bearingDeg: number): 'north' | 'east' | 'south' | 'west
 export function atlasLayout(width: number, height: number): AtlasLayout {
   if (width > 0 && 2 * width === 3 * height) return { ok: true, faceSize: width / 3 };
   return { ok: false, message: `A sky atlas must be exactly 3:2 (3 faces wide, 2 high); this image is ${width} × ${height}.` };
+}
+
+// --- Hero geometry, the way Nuit draws it (BRIEF §4.1–4.3) -----------------------------
+
+/**
+ * Port of MultiTexturedSkybox's face loop: for each face, the overlap of the uvRange with the face's
+ * atlas cell, mapped linearly onto the face, showing the matching part of the image. Inside the
+ * North cell this is one piece; a range that crosses a cell edge is split, and bends at the cube edge.
+ * Values are clamped to [0, 1] first, as Nuit's UVRange codec does. Nuit also emits a zero-area quad
+ * when an edge only touches a cell (PLAN §1.5); it draws nothing, so it is left out here.
+ */
+export function heroPieces(range: UvRange): HeroPiece[] {
+  const c = (x: number): number => clamp(x, 0, 1);
+  const uv = { minU: c(range.minU), minV: c(range.minV), maxU: c(range.maxU), maxV: c(range.maxV) };
+  const pieces: HeroPiece[] = [];
+  for (const face of FACES) {
+    const cellU = face.col / 3;
+    const cellV = face.row / 2;
+    const u0 = Math.max(uv.minU, cellU);
+    const u1 = Math.min(uv.maxU, cellU + 1 / 3);
+    const v0 = Math.max(uv.minV, cellV);
+    const v1 = Math.min(uv.maxV, cellV + 1 / 2);
+    if (!(u0 < u1 && v0 < v1)) continue;
+    // The same inverse as BRIEF §6.3, for any cell: s = 6(u − cellU) − 1, t = 1 − 4(v − cellV).
+    pieces.push({
+      face: face.name,
+      rect: { s0: 6 * (u0 - cellU) - 1, s1: 6 * (u1 - cellU) - 1, t0: 1 - 4 * (v1 - cellV), t1: 1 - 4 * (v0 - cellV) },
+      tex: {
+        u0: (u0 - uv.minU) / (uv.maxU - uv.minU),
+        u1: (u1 - uv.minU) / (uv.maxU - uv.minU),
+        v0: (v0 - uv.minV) / (uv.maxV - uv.minV),
+        v1: (v1 - uv.minV) / (uv.maxV - uv.minV),
+      },
+    });
+  }
+  return pieces;
+}
+
+// --- Directions (BRIEF §4.5, §4.6) ------------------------------------------------------
+
+const rotX = ([x, y, z]: Vec3, deg: number): Vec3 => {
+  const a = deg * DEG;
+  return [x, y * Math.cos(a) - z * Math.sin(a), y * Math.sin(a) + z * Math.cos(a)];
+};
+const rotY = ([x, y, z]: Vec3, deg: number): Vec3 => {
+  const a = deg * DEG;
+  return [x * Math.cos(a) + z * Math.sin(a), y, -x * Math.sin(a) + z * Math.cos(a)];
+};
+const rotZ = ([x, y, z]: Vec3, deg: number): Vec3 => {
+  const a = deg * DEG;
+  return [x * Math.cos(a) - y * Math.sin(a), x * Math.sin(a) + y * Math.cos(a), z];
+};
+
+/** Nuit's mapping M = R_z·R_y·R_x applied to v: X first, then Y, then Z (rule 4), with the sign constants. */
+export function applyMapping(v: Vec3, [x, y, z]: Vec3): Vec3 {
+  return rotZ(rotY(rotX(v, SIGN_MAPPING_X * x), SIGN_MAPPING_Y * y), z);
+}
+
+/** The point on the cube for an atlas point (u, v): the face whose cell holds it, at c + s·r + t·u. */
+export function atlasPointToCube(u: number, v: number): Vec3 {
+  const col = clamp(Math.floor(u * 3), 0, 2);
+  const row = clamp(Math.floor(v * 2), 0, 1);
+  const face = FACES.find((f) => f.col === col && f.row === row)!;
+  const s = 6 * (u - col / 3) - 1;
+  const t = 1 - 4 * (v - row / 2);
+  return [0, 1, 2].map((i) => face.centre[i] + s * face.right[i] + t * face.up[i]) as Vec3;
+}
+
+/**
+ * World direction of the middle of the hero's uvRange: Spin·M·p, the same as Nuit's Y(θ)·M (BRIEF §4.5).
+ * For a hero inside the North cell, p = (s_c, t_c, −1).
+ */
+export function heroCentreDirection(uv: UvRange, mapping: Vec3, thetaDeg: number): Vec3 {
+  const p = atlasPointToCube((uv.minU + uv.maxU) / 2, (uv.minV + uv.maxV) / 2);
+  return rotY(applyMapping(p, mapping), thetaDeg);
+}
+
+/** Bearing (clockwise from north) and pitch that look along a direction; pitch is clamped to ±89°. */
+export function viewToward([x, y, z]: Vec3): { yawDeg: number; pitchDeg: number } {
+  return { yawDeg: wrapDeg180(Math.atan2(x, -z) / DEG), pitchDeg: clampPitch(Math.atan2(y, Math.hypot(x, z)) / DEG) };
+}
+
+/** A bearing in quadrant form, measured from north or south toward east or west: −30 → N 30° W, 150 → S 30° E. */
+export function quadrantBearing(bearingDeg: number): { from: 'N' | 'S'; deg: number; to: 'E' | 'W' } {
+  const b = wrapDeg180(bearingDeg);
+  const to = b < 0 ? 'W' : 'E';
+  const abs = Math.abs(b);
+  return abs <= 90 ? { from: 'N', deg: abs, to } : { from: 'S', deg: 180 - abs, to };
 }

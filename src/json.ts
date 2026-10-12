@@ -14,6 +14,19 @@ export function mcmetaFileName(texture: string): string {
   return `${texture.split(/[/:]/).pop()}.mcmeta`;
 }
 
+/**
+ * Why Minecraft would not find this texture, or null if the path looks right. A resource location is
+ * namespace:path, using only a–z, 0–9, _ . - (and / in the path), and Nuit wants the full file name.
+ */
+export function textureProblem(texture: string): string | null {
+  const m = /^([^:]*):(.*)$/.exec(texture);
+  if (!m) return 'Write the texture as namespace:path, e.g. "sasheen:textures/sky/hero.png".';
+  if (!/^[a-z0-9_.-]+$/.test(m[1])) return `The namespace "${m[1]}" may only use a–z, 0–9, _ . and -.`;
+  if (!/^[a-z0-9_./-]+$/.test(m[2])) return 'The path may only use a–z, 0–9, _ . - and /. Minecraft rejects capitals and spaces.';
+  if (!m[2].endsWith('.png')) return 'The path should end in ".png", as Nuit reads the file name as written.';
+  return null;
+}
+
 // --- Build ---------------------------------------------------------------------
 
 /** Assembles a full JSON object from the editable fields plus the fixed ones. */

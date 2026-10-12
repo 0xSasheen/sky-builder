@@ -101,7 +101,16 @@ export interface AppState {
 /** A rectangle on the North face in face coordinates; s0 < s1 (left, right), t0 < t1 (bottom, top). */
 export interface FaceRect { s0: number; s1: number; t0: number; t1: number; }
 
-export type WarningCode = 'k' | 'ak' | 'zenith' | 'outsideCell' | 'notCentred';
+export type WarningCode = 'empty' | 'k' | 'ak' | 'zenith' | 'outsideCell' | 'notCentred';
+
+/** The part of the hero Nuit draws on one cube face (BRIEF §4.1). */
+export interface HeroPiece {
+  face: FaceName;
+  /** Where on the face, in face coordinates. */
+  rect: FaceRect;
+  /** Which part of the hero image, as fractions: u left to right, v top to bottom (V = 0 is the top). */
+  tex: { u0: number; u1: number; v0: number; v1: number };
+}
 
 export interface Warning {
   code: WarningCode;
