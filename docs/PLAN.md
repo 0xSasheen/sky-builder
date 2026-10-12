@@ -604,7 +604,7 @@ download is harmless but unnecessary.
 | 2 | Mapping Y sign and UI | The slider is the **raw mapping Y** (positive = west), with a noon-bearing readout. `SIGN_MAPPING_Y = +1`, pending check A in section 10. |
 | 3 | Spin | **Vanilla 26.2 curve** (cubic Bézier from `day.json`), with no linear option. Target: plain Nuit and vanilla 26.x, no datapacks. Time defaults to 6000. |
 | 4 | Bottom face | **Closed** (source-verified, §1.4). |
-| 5 | mcmeta | Keep the download; check B in section 10. |
+| 5 | mcmeta | Keep the download. **Closed from source on 2026-10-11** (section 1.6): the file is applied, and check B in section 10 is optional. |
 | 6 | Scope | Wall mode in M3; crossfade after M5. |
 | 7 | Name | **sky-builder** everywhere; Pages `base: '/sky-builder/'`. |
 | 8 | Colour | No colour conversion (`NoColorSpace` + `LinearSRGBColorSpace`), matching Minecraft's gamma-space blending. |

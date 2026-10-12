@@ -179,6 +179,11 @@ Confirmed by reading the source (§13), and re-checked during planning (PLAN §1
    formula to within 0.06°. Key values: θ(0) ≈ 282.4°, θ(6000) = 0°,
    θ(12000) ≈ 77.6°, θ(18000) = 180°. So with mapping Y = 0, the hero is due
    north at noon, about 78° east of north at tick 0, and due south at midnight.
+8. **Texture sampling.** `SkyboxManager.registerTextures` loads each texture as a
+   vanilla `SimpleTexture`, and `NuitRenderBackend.drawTextured` binds the texture's
+   own sampler. So vanilla `.mcmeta` rules apply: without `"blur": true` a texture is
+   sampled with nearest filtering and no mipmaps (the sky atlases); with it, linear
+   filtering (the hero, via `hero.png.mcmeta`). Details in PLAN §1.6.
 
 ---
 
@@ -360,7 +365,8 @@ to each constraint limit, and warnings when a §6.1 constraint is broken.
   Each is centred at $\mathbf{c}$, its local x axis along $\mathbf{r}$ and its
   local y axis along $\mathbf{u}$, facing inward. Texture each one with its
   cell cropped from the atlas onto a canvas, so nothing bleeds between cells.
-  Use `ClampToEdgeWrapping`, `MeshBasicMaterial`, and `depthWrite: false`.
+  Use `ClampToEdgeWrapping`, `MeshBasicMaterial`, `depthWrite: false`, and
+  `NearestFilter` with no mipmaps (§4.8).
   **No colour conversion:** textures use `NoColorSpace` and the renderer uses
   `outputColorSpace = LinearSRGBColorSpace`, so blending happens in gamma space
   as it does in Minecraft. This matters for semi-transparent hero edges and the
@@ -421,7 +427,7 @@ tests/
 
 ## 12. Open questions and unverified facts
 
-Raise these in the plan. Don't guess silently. Status as of 2026-10-04:
+Raise these in the plan. Don't guess silently. Status as of 2026-10-11:
 
 1. **Sign of mapping X.** ✅ Closed. Positive X tilts the North face **up**. The
    source says so, and the running config (X = +22.47, hero above the horizon)
@@ -431,8 +437,10 @@ Raise these in the plan. Don't guess silently. Status as of 2026-10-04:
 3. **Spin direction and phase.** ✅ Closed from source and vanilla 26.2 data;
    see §4.7.
 4. **Bottom face orientation.** ✅ Closed from source; see §3.
-5. **Whether Minecraft applies `hero.png.mcmeta`.** ⏳ Not settled by the
-   source. Keep the download; check in game (PLAN §10).
+5. **Whether Minecraft applies `hero.png.mcmeta`.** ✅ Closed from source (2026-10-11).
+   Nuit loads every texture as a vanilla `SimpleTexture` and binds that texture's own
+   sampler, so `.mcmeta` `blur` and `clamp` apply; see §4.8. Keep the download. In-game
+   check B (PLAN §10) is now only an optional confirmation.
 6. **Scope.** ✅ Wall mode ships in M3. The crossfade waits until after M5.
 
 ---
