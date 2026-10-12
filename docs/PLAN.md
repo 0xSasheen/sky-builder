@@ -1,7 +1,7 @@
 # Sky Builder: implementation plan
 
-Status: **M1 and M2 done and merged to `main`. M3 done (2026-10-12), on branch `m3-hero`**, awaiting review.
-Next: M3½ (in-game check A), then M4. Decisions are in sections 11 and 12.
+Status: **M1–M3 done and merged to `main`. Panorama input (section 13) done on branch `pano-input`**, awaiting review.
+Next: M3½ (in-game check A), then M4. Decisions are in sections 11–13.
 
 Contents: 1. Source verification · 2. Architecture · 3. Types · 4. `math.ts` API and tests ·
 5. JSON output · 6. Rendering · 7. Time spin · 8. UI · 9. Milestones ·
@@ -213,7 +213,11 @@ tests/
   json.test.ts   byte-for-byte §5 for case 3, import/parse cases
   faces.test.ts  Nuit face matrices vs our face table; hero placement (uses three, not the DOM)
   view.test.ts   scene.ts's face meshes and view.ts's camera: the M2 and M3 checks, done geometrically
+  panorama.test.ts  panorama → atlas against sky_convert.py's convention and its own output (section 13)
+  png.ts         a small PNG reader for the test fixtures
 ```
+
+`src/convert.worker.ts` (section 13) runs `math.panoramaToAtlas` off the main thread.
 
 Module dependencies (arrows mean "imports"):
 
@@ -387,6 +391,10 @@ All angles in the API are in **degrees**. Conversion to radians happens inside e
 | `heroCentreDirection(uv, mapping, θ)` | `Vec3` | $Y(\theta)\,M\,\mathbf p$ for the middle of the range, for "Look at hero". Added in M3 |
 | `viewToward(d)` | `{yawDeg, pitchDeg}` | bearing $\operatorname{atan2}(d_x, -d_z)$, pitch $\operatorname{atan2}(d_y, \sqrt{d_x^2 + d_z^2})$, clamped. Added in M3 |
 | `quadrantBearing(b)` | `{from, deg, to}` | −30 → N 30° W, 150 → S 30° E, for the noon readout. Added in M3 |
+| `skyKindFromSize(W, H)` | `'atlas' \| 'panorama' \| null` | 3:2 or 2:1, for the Auto sky type. Section 13 |
+| `panoramaLayout(W, H)` | default face size, or an error message | requires $W = 2H$; $F = \operatorname{round}(W/4)$ within `PANO_FACE_RANGE`. Section 13 |
+| `directionToPanorama(d, W, H, λ0?)` | `{x, y}` | section 13.2 steps 3–4 |
+| `panoramaToAtlas(pano, F, λ0?, onFace?)` | `RgbaImage` | section 13.2; a port of `sky_convert.py`'s `pano_to_atlas` |
 
 The `aspectFromUv` derivation, step by step:
 the hero spans $s \in [-ak, ak]$, so its width in $s$ is $2ak$. Since $s = 6(u - \tfrac13) - 1$,
@@ -651,6 +659,118 @@ do `fragColor = texture(Sampler0, uv) * ColorModulator` and discard only `a == 0
    allowed characters, or that doesn't end in `.png`. It is shown under the box and doesn't block anything.
 9. **Default hero** is `reference/samples/test_hero_1063x1502.png`. Loading an image fills in the W × H boxes,
    which can then be overridden.
+
+---
+
+## 13. Panorama input (approved 2026-10-12, built on branch `pano-input`)
+
+**Request:** let the sky upload take either an atlas or an equirectangular panorama, chosen from a dropdown, and
+convert a panorama to an atlas in the browser. This reverses the old BRIEF §10 non-goal "Converting panoramas to
+atlases"; BRIEF §8, §10, §13 and §14 are updated.
+
+**Decisions (2026-10-12):** the dropdown has **Auto (by shape)** as its default, plus Atlas and Panorama. The
+left-edge bearing is **not** a UI field: it is the constant `PANO_LEFT_BEARING_DEG` (−135°, `sky_convert.py`'s
+convention) and an optional parameter of the conversion, so a field can be added later in one line. The `sky_convert.py`
+cross-check was run in a throwaway venv in the session scratchpad, and its output is committed as test fixtures.
+
+### 13.1 Convention: the same as `reference/sky_convert.py`
+
+Atlases already in the pack were made with `sky_convert.py`, and its docstring warns that other converters may start
+the panorama at a different heading or mirror it. So the browser port uses the script's convention exactly:
+
+- The panorama is exactly 2:1 ($W = 2H$), as the script requires.
+- Column $x = 0$ is the south-west corner (bearing $\lambda_0 = -135°$), and $x$ grows turning right (clockwise
+  from above). So the face centres W, N, E, S sit at $\tfrac{W}{8}, \tfrac{3W}{8}, \tfrac{5W}{8}, \tfrac{7W}{8}$.
+- Row $y = 0$ is straight up, $y = \tfrac{H}{2}$ the horizon, $y = H$ straight down.
+- A panorama made with another convention comes out turned. Shift its columns in an image editor first, or add the
+  left-edge field (see the decisions above).
+
+### 13.2 The conversion, step by step (`math.panoramaToAtlas`, pure)
+
+For each face (BRIEF §3 table) and each atlas pixel $(i, j)$ in that face's cell, with face size $F$:
+
+1. Pixel centre in face coordinates: $s = \dfrac{2(i + \tfrac12)}{F} - 1$ and $t = 1 - \dfrac{2(j + \tfrac12)}{F}$
+   (row 0 is the top of the cell, $t = +1$).
+2. Direction: $\mathbf d = \mathbf c + s\,\mathbf r + t\,\mathbf u$. Only its direction matters.
+3. Bearing and elevation: $\lambda = \operatorname{atan2}(d_x, -d_z)$ and
+   $\varphi = \arcsin\!\left(\dfrac{d_y}{\lVert\mathbf d\rVert}\right)$.
+4. Panorama position, in pixel units with pixel centres on whole numbers:
+   $x = \dfrac{(\lambda - \lambda_0) \bmod 360°}{360°}\,W - \tfrac12$ and $y = \dfrac{90° - \varphi}{180°}\,H - \tfrac12$
+   (`math.directionToPanorama`).
+5. Bilinear sample: $x$ wraps around ($\bmod W$), and $y$ is clamped to $[0, H - 1]$, as in the script's `_bilinear`.
+6. Round each channel to the nearest integer, half to even. Writing into a `Uint8ClampedArray` does exactly this,
+   like numpy's `rint` and `clip` in the script. Alpha is kept.
+
+Check with the north face's centre: $s = t = 0$ gives $\mathbf d = (0, 0, -1)$, so $\lambda = 0$ and $\varphi = 0$.
+Then $x = \tfrac{135}{360}W - \tfrac12 = \tfrac{3W}{8} - \tfrac12$, which is the continuous position $\tfrac{3W}{8}$, and
+$y = \tfrac{H}{2} - \tfrac12$, the horizon. This matches the docstring.
+
+**Face size.** It defaults to $F = \operatorname{round}(W/4)$, the script's ratio (8192 → 2048), within
+`PANO_FACE_RANGE` (16 to 2730). The script refuses faces over 2730, because the atlas would pass 8192 px wide. The
+box can be edited.
+
+**Speed.** In Node, an 8192 × 4096 panorama to 2048 px faces takes 3.0 s. The loop reuses one output object for
+the sample position instead of allocating one per pixel; that took it from 4.4 s. In Edge, the 2048-wide sample
+converts in 0.4 s.
+
+### 13.3 Where it runs
+
+The conversion runs in a **Web Worker** (`src/convert.worker.ts`), so the page doesn't freeze. A Web Worker is
+like a Java thread that shares no memory and talks only by messages.
+
+1. The main thread decodes the file (`createImageBitmap`, `colorSpaceConversion: 'none'`), because Auto needs the size.
+2. If it is a panorama, the `ImageBitmap` is *transferred* to a new worker, not copied, like handing a `byte[]` to
+   another thread and giving up your reference.
+3. The worker reads the pixels through an `OffscreenCanvas` (panoramas are opaque, so the canvas's premultiplied
+   storage loses nothing), calls `math.panoramaToAtlas`, and reports progress after each face.
+4. It encodes the atlas as a PNG (`OffscreenCanvas.convertToBlob`) and transfers back the PNG `Blob` and an `ImageBitmap`.
+5. The main thread shows the bitmap through the existing `scene.setAtlas`, and shows **Download atlas (PNG)**, named
+   `<panorama name>_atlas.png`, so the result can go straight into the pack.
+
+A new file, type or face size stops a running conversion (`terminate()`), and a load counter drops any decode that a
+newer load has overtaken. Memory for an 8192-wide panorama is about 128 MB for the panorama plus about 96 MB for the
+atlas. Fine on a desktop; very large panoramas may fail on phones, which the status line reports.
+
+### 13.4 UI (Files section)
+
+```
+Sky       [ Auto (by shape) ▾ ]  [Choose file]
+          status: pano.png · 8192 × 4096 panorama → atlas 6144 × 4096 (faces 2048 px) · 3.1 s
+          ── while the sky comes from a panorama ──
+          Face size  [ 2048 ]
+          [ Download atlas (PNG) ]
+```
+
+- Auto picks the type from the shape. A chosen type must match it. On a mismatch the message names the other type
+  ("It is 2:1, so choose Panorama or Auto."), and the previous sky stays.
+- The face size re-runs the conversion when committed (Enter, or leaving the box), not on every keystroke.
+
+### 13.5 Tests (`tests/panorama.test.ts`)
+
+`math.panoramaToAtlas` and `math.directionToPanorama` are pure, so vitest drives them without a browser:
+
+- **Geometry, from the convention in 13.1:** the W, N, E and S face centres land at $\tfrac{W}{8}, \tfrac{3W}{8},
+  \tfrac{5W}{8}, \tfrac{7W}{8}$ on the horizon; straight up and down land on the first and last rows; the left edge is
+  the south-west corner; and turning the left-edge bearing by 45° moves everything by $\tfrac{W}{8}$.
+- **Pixels:** a uniform panorama gives a uniform atlas of shape $3F \times 2F$, which `atlasLayout` accepts, and
+  progress is reported once per face.
+- **Against `sky_convert.py` itself:** `reference/samples/pano_test_256x128.png` is synthetic (red = column, so it jumps
+  at the wrap; green = 2 × row; blue = a 16 px checkerboard). `pano_test_atlas_f64.png` and `pano_test_atlas_f37.png`
+  are the script's output at face sizes 64 and 37 (37 is odd, so a pixel sits exactly on each face centre, and it also
+  tests shrinking). Every channel must match within 1, in under 1 % of values. Results: face 64 identical; face 37,
+  2 of 32 856 values off by 1, from the script's float32 arithmetic.
+- `tests/png.ts` reads the fixtures with web-standard APIs only (Vite `?inline` and `DecompressionStream`), so the
+  tests need no Node type definitions.
+- **End to end in Edge:** `reference/samples/placeholder_pano_2048x1024.png` (made from `placeholder_atlas.png` with
+  `sky_convert.py to-pano`) was converted in the browser and downloaded. Against the script's own `to-atlas` of the
+  same panorama, 4 of 6 291 456 values differ, each by 1. Rendered, it shows the same M2 orientation checks as the atlas.
+
+The planned seam test was not needed as a separate test: the fixtures cross every cube edge and the wrap.
+
+### 13.6 Placement
+
+A small milestone of its own, on branch `pano-input`, after M3 and before M4. `sky_convert.py` stays for offline and
+batch use (including atlas → panorama), and as the reference for the convention.
 
 ---
 

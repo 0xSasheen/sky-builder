@@ -326,8 +326,13 @@ then ×1.15 or ×1.5. In the file, `k` values are given unrounded; use them as-i
 ## 8. Functional requirements
 
 ### Inputs
-- **Sky atlas:** file picker plus drag-and-drop. Must be 3:2; reject anything
-  else with a clear message. Default to `reference/samples/placeholder_atlas.png`.
+- **Sky:** file picker plus drag-and-drop, with a type dropdown: **Auto (by
+  shape)** (the default), **Atlas** or **Panorama**. An atlas must be 3:2. A
+  panorama must be 2:1 equirectangular; it is converted to an atlas in the browser
+  with exactly `reference/sky_convert.py`'s convention (left edge = south-west),
+  with an editable face size (default width ÷ 4, at most 2730), and the result can
+  be downloaded as a PNG for the pack (PLAN §13). Reject anything else with a clear
+  message. Default to `reference/samples/placeholder_atlas.png`.
 - **Hero image:** file picker plus drag-and-drop. Read its width and height
   automatically, with manual override fields. Respect alpha.
 - Everything runs locally in the browser. Use object URLs; never upload anything.
@@ -399,7 +404,9 @@ to each constraint limit, and warnings when a §6.1 constraint is broken.
 
 ## 10. Non-goals
 
-- Converting panoramas to atlases. `reference/sky_convert.py` already does that.
+- Converting atlases back to panoramas, or panoramas made with another
+  converter's convention (shift or mirror them first). `reference/sky_convert.py`
+  does atlas → panorama. Panorama → atlas *is* in scope since 2026-10-12 (§8).
 - Editing the sky atlases themselves.
 - Any server or backend. The tool is a static site.
 
@@ -463,6 +470,8 @@ Raise these in the plan. Don't guess silently. Status as of 2026-10-11:
 | `test-vectors.json` | §7 as data, for the tests |
 | `samples/placeholder_atlas.png` | Labelled 3 × 2 atlas (512 px faces) with UP markers, horizon lines, and the neighbouring compass letters on each edge. Use it to check orientation |
 | `samples/test_hero_1063x1502.png` | Grid test card at the hero's real size, marked TOP, BOTTOM, L and R |
+| `samples/placeholder_pano_2048x1024.png` | The placeholder atlas as a panorama (`sky_convert.py to-pano`), for trying the panorama input |
+| `samples/pano_test_256x128.png`, `pano_test_atlas_f64.png`, `pano_test_atlas_f37.png` | A synthetic panorama and `sky_convert.py to-atlas` output from it at faces 64 and 37: test fixtures for the browser port (PLAN §13.5) |
 | `pack-example/assets/nuit/sky/*.json` | The three working layer files. Note: `sky1`/`sky2` still have the old top-level `"blend"` object, which 26.2 ignores |
 | `pack-example/.../hero.png.mcmeta` | The filtering metadata |
 | `sky_convert.py` | Atlas ↔ panorama converter. Source of the face table in §3 |
@@ -514,6 +523,11 @@ After each one, stop and report what was done and exactly how to check it.
   warnings are live. Check: with case 3's values, the test card and the time
   at 6000 (θ = 0), at yaw 0 and pitch 22.47° the card is an upright rectangle centred on screen, with
   TOP at the top, L on the left, and its bottom edge 10° below the horizon.
+- **Panorama input** (added 2026-10-12, PLAN §13). The sky upload takes a 2:1
+  panorama and converts it in the browser, with Auto/Atlas/Panorama and a face
+  size. Check: `samples/placeholder_pano_2048x1024.png` gives the same M2 views as
+  the atlas, and its downloaded atlas matches `sky_convert.py to-atlas` within 1
+  per channel.
 - **M4, Time and I/O.** Time-of-day spin with play/pause; Copy and Download;
   `.mcmeta` download; JSON import that restores the sliders (round trip:
   export → import → identical JSON).
