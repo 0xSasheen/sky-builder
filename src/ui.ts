@@ -1,7 +1,7 @@
 // Controls and readouts, in plain DOM (PLAN §8). The UI never changes state itself:
 // it reports what the user did through the handlers, and main.ts calls show*() with the result.
 
-import { FACE_WARN_LIMIT, K_RANGE, PANO_FACE_RANGE, RANGES } from './constants.ts';
+import { FACE_WARN_LIMIT, K_RANGE, PANO_FACE_RANGE, PANO_LEFT_BEARING_RANGE, RANGES } from './constants.ts';
 import { heightFromK, kFromHeight, mcFacing, mcYawPitch, noonBearingDeg, quadrantBearing } from './math.ts';
 import type { HeroMode, HeroParams, Readouts, Sky3Json, SkyType, ViewState } from './schema.ts';
 
@@ -16,8 +16,14 @@ export interface UiHandlers {
   onSkyType(type: SkyType): void;
   /** A new face size for a panorama's atlas, committed with Enter or by leaving the box. */
   onFaceSize(faceSize: number): void;
+  /** The left-edge slider is moving: preview by turning the sky, without converting (PLAN §13.7). */
+  onLeftBearingPreview(leftBearingDeg: number): void;
+  /** A left-edge bearing to convert with: the slider was let go, or the box was committed. */
+  onLeftBearing(leftBearingDeg: number): void;
   onDownloadAtlas(): void;
   onHeroFile(file: File): void;
+  /** Back to the sample sky, the test card and the starting hero settings. */
+  onReset(): void;
 }
 
 /** What the hero part of the panel shows; everything after `hero` comes from the JSON object. */
@@ -103,6 +109,9 @@ export class Ui {
   private readonly skyType = byId<HTMLSelectElement>('sky-type');
   private readonly panoOptions = byId<HTMLDivElement>('pano-options');
   private readonly faceSize = byId<HTMLInputElement>('face-size');
+  private readonly leftBearing = byId<HTMLInputElement>('left-bearing');
+  private readonly leftBearingNum = byId<HTMLInputElement>('left-bearing-num');
+  private readonly fileInputs = [byId<HTMLInputElement>('sky-file'), byId<HTMLInputElement>('hero-file')];
   private readonly panoDownload = byId<HTMLDivElement>('pano-download');
   private readonly heroStatus = byId<HTMLParagraphElement>('hero-status');
   private readonly modes = [...document.querySelectorAll<HTMLInputElement>('input[name="mode"]')];
@@ -138,7 +147,24 @@ export class Ui {
     this.faceSize.addEventListener('change', () => {
       if (Number.isFinite(this.faceSize.valueAsNumber)) handlers.onFaceSize(this.faceSize.valueAsNumber);
     });
+    // The left edge: the slider previews while it moves and converts when let go; the box converts when committed.
+    for (const el of [this.leftBearing, this.leftBearingNum]) {
+      el.min = String(PANO_LEFT_BEARING_RANGE.min);
+      el.max = String(PANO_LEFT_BEARING_RANGE.max);
+    }
+    this.leftBearing.addEventListener('input', () => {
+      this.leftBearingNum.value = String(this.leftBearing.valueAsNumber);
+      handlers.onLeftBearingPreview(this.leftBearing.valueAsNumber);
+    });
+    this.leftBearing.addEventListener('change', () => handlers.onLeftBearing(this.leftBearing.valueAsNumber));
+    this.leftBearingNum.addEventListener('change', () => {
+      if (Number.isFinite(this.leftBearingNum.valueAsNumber)) handlers.onLeftBearing(this.leftBearingNum.valueAsNumber);
+    });
     byId('download-atlas').addEventListener('click', () => handlers.onDownloadAtlas());
+    byId('reset').addEventListener('click', () => {
+      if (window.confirm('Reset to the sample sky, the test card and the starting hero settings? '
+        + 'Your current sky, hero image and settings will be replaced.')) handlers.onReset();
+    });
     this.setImageW = bindNumber(byId('image-w'), 0, (imageW) => handlers.onHero({ imageW }));
     this.setImageH = bindNumber(byId('image-h'), 0, (imageH) => handlers.onHero({ imageH }));
 
@@ -236,10 +262,22 @@ export class Ui {
     this.skyStatus.classList.toggle('error', isError);
   }
 
-  /** The face size box, shown while the sky comes from a panorama; null hides it. */
-  showPanoramaOptions(faceSize: number | null): void {
-    this.panoOptions.hidden = faceSize === null;
-    if (faceSize !== null) this.faceSize.value = String(faceSize);
+  /** The face size and left-edge controls, shown while the sky comes from a panorama; null hides them. */
+  showPanoramaOptions(options: { faceSize: number; leftBearingDeg: number } | null): void {
+    this.panoOptions.hidden = options === null;
+    if (options === null) return;
+    this.faceSize.value = String(options.faceSize);
+    this.leftBearing.value = String(options.leftBearingDeg);
+    if (document.activeElement !== this.leftBearingNum) this.leftBearingNum.value = String(options.leftBearingDeg);
+  }
+
+  showSkyType(type: SkyType): void {
+    this.skyType.value = type;
+  }
+
+  /** Empties both file pickers, so they don't name a file that is no longer shown. */
+  clearFileInputs(): void {
+    for (const input of this.fileInputs) input.value = '';
   }
 
   showAtlasDownload(visible: boolean): void {

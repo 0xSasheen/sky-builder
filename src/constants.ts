@@ -39,6 +39,8 @@ export const SUN_ANGLE_BEZIER = [0.362, 0.241, 0.638, 0.759] as const;
 export const PANO_LEFT_BEARING_DEG = -135;
 /** Face sizes for a converted atlas. sky_convert.py refuses faces over 2730, as the atlas would pass 8192 px wide. */
 export const PANO_FACE_RANGE = { min: 16, max: 2730 } as const;
+/** The left-edge bearing field (PLAN §13.7), for panoramas made with another convention. */
+export const PANO_LEFT_BEARING_RANGE = { min: -180, max: 180 } as const;
 
 // --- Constraints (BRIEF §6.1) ------------------------------------------------
 

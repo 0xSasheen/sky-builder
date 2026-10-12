@@ -8,6 +8,8 @@ export interface ConvertRequest {
   /** The decoded panorama (colorSpaceConversion 'none'); this worker closes it. */
   image: ImageBitmap;
   faceSize: number;
+  /** Compass bearing of the panorama's left edge (PLAN §13.7). */
+  leftBearingDeg: number;
 }
 
 export type ConvertReply =
@@ -21,7 +23,7 @@ function reply(message: ConvertReply, transfer: Transferable[] = []): void {
 }
 
 self.onmessage = async (event: MessageEvent<ConvertRequest>) => {
-  const { image, faceSize } = event.data;
+  const { image, faceSize, leftBearingDeg } = event.data;
   try {
     // Read the pixels. Panoramas are opaque, so the canvas's premultiplied storage loses nothing.
     const source = new OffscreenCanvas(image.width, image.height);
@@ -30,7 +32,7 @@ self.onmessage = async (event: MessageEvent<ConvertRequest>) => {
     image.close();
     const pixels = sourceContext.getImageData(0, 0, source.width, source.height);
 
-    const atlas = panoramaToAtlas(pixels, faceSize, undefined,
+    const atlas = panoramaToAtlas(pixels, faceSize, leftBearingDeg,
       (done, total) => reply({ type: 'progress', stage: 'convert', done, total }));
 
     // A PNG for the download button, and a bitmap for the preview.

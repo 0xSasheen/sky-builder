@@ -6,9 +6,9 @@ import { Matrix4, PerspectiveCamera, Vector3 } from 'three';
 import { describe, expect, it } from 'vitest';
 import { FACES } from '../src/constants.ts';
 import { buildSky3 } from '../src/json.ts';
-import { heroPieces } from '../src/math.ts';
-import { facePlacement, heroGeometry, heroMappingEuler } from '../src/scene.ts';
-import type { FaceName } from '../src/schema.ts';
+import { directionToPanorama, heroPieces } from '../src/math.ts';
+import { facePlacement, heroGeometry, heroMappingEuler, skyTurnRotationY } from '../src/scene.ts';
+import type { FaceName, Vec3 } from '../src/schema.ts';
 import { applyCameraView } from '../src/view.ts';
 import { cases, params } from './vectors.ts';
 
@@ -122,5 +122,28 @@ describe('BRIEF §14 M3 check, geometrically', () => {
     const mid = bl.world.clone().add(br.world).multiplyScalar(0.5);
     const elevation = (Math.asin(mid.y / mid.length()) * 180) / Math.PI;
     expect(Math.abs(elevation - -10)).toBeLessThan(0.01);
+  });
+});
+
+describe('panorama heading preview (PLAN §13.7)', () => {
+  it('turning the sky by Δ shows what converting with left edge λ0 + Δ gives', () => {
+    // A viewer looking along w sees the turned atlas at R⁻¹·w, which samples the panorama there with λ0.
+    const W = 800;
+    const H = 400;
+    for (const delta of [45, -30, 170]) {
+      const inverse = new Matrix4().makeRotationY(skyTurnRotationY(delta)).invert();
+      for (const w of [[0, 0, -1], [0.4, 0.3, -1], [-1, -0.5, 0.2], [0.1, 0.9, 0.3]] as Vec3[]) {
+        const local = new Vector3(...w).applyMatrix4(inverse).toArray() as Vec3;
+        const previewed = directionToPanorama(local, W, H, -135);
+        const converted = directionToPanorama(w, W, H, -135 + delta);
+        expect((((previewed.x - converted.x) % W) + W + W / 2) % W - W / 2).toBeCloseTo(0, 9);
+        expect(previewed.y).toBeCloseTo(converted.y, 9);
+      }
+    }
+  });
+
+  it('a positive turn moves the sky clockwise, like a bearing', () => {
+    const north = new Vector3(0, 0, -1).applyMatrix4(new Matrix4().makeRotationY(skyTurnRotationY(90)));
+    expect(north.distanceTo(new Vector3(1, 0, 0))).toBeLessThan(1e-12); // north turns to east
   });
 });

@@ -15,7 +15,10 @@
       </div>
 
       <aside class="panel">
-        <h1>Sky Builder</h1>
+        <div class="title-row">
+          <h1>Sky Builder</h1>
+          <button type="button" id="reset" title="Back to the sample atlas, the test card and the starting hero settings">Reset sky and hero</button>
+        </div>
 
         <section>
           <h2>Files</h2>
@@ -31,10 +34,21 @@
             </div>
           </div>
           <p class="status" id="sky-status" role="status"></p>
-          <div class="field range" id="pano-options" hidden>
-            <label for="face-size">Face size</label>
-            <span class="hint">px per cube face; the atlas is 3 × 2 faces</span>
-            <input type="number" id="face-size" step="1" aria-label="Face size in pixels" />
+          <div id="pano-options" hidden>
+            <div class="field range">
+              <label for="face-size">Face size</label>
+              <span class="hint">px per cube face; the atlas is 3 × 2 faces</span>
+              <input type="number" id="face-size" step="1" aria-label="Face size in pixels" />
+            </div>
+            <div class="field range">
+              <label for="left-bearing">Left edge</label>
+              <input type="range" id="left-bearing" step="1" />
+              <input type="number" id="left-bearing-num" step="0.1" aria-label="Bearing of the panorama's left edge in degrees" />
+            </div>
+            <p class="hint">
+              The compass bearing the panorama's left edge faces. sky_convert.py uses −135 (south-west);
+              other tools often put north in the middle, which is −180. Drag to line the sky up by eye.
+            </p>
           </div>
           <div class="buttons" id="pano-download" hidden>
             <button type="button" id="download-atlas">Download atlas (PNG)</button>

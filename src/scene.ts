@@ -38,6 +38,14 @@ export function facePlacement(face: FaceDef): Matrix4 {
   return new Matrix4().makeBasis(right, up, normal).setPosition(...face.centre);
 }
 
+/**
+ * skyFaces' y rotation for a preview turn of the sky, in degrees clockwise from above (like a bearing).
+ * Three.js turns counter-clockwise for a positive angle, hence the minus (as for the camera's yaw).
+ */
+export function skyTurnRotationY(turnDeg: number): number {
+  return -turnDeg * DEG;
+}
+
 /** heroGroup's rotation for a JSON mapping [X, Y, Z]: Euler order 'ZYX' is the matrix R_z·R_y·R_x (rule 4). */
 export function heroMappingEuler([x, y, z]: Vec3): Euler {
   return new Euler(SIGN_MAPPING_X * x * DEG, SIGN_MAPPING_Y * y * DEG, z * DEG, 'ZYX');
@@ -74,6 +82,11 @@ export class SkyScene {
   private readonly scene = new Scene();
   /** Turned by the daily spin Y(θ) (BRIEF §4.5); holds everything that moves with the sky. */
   private readonly spinGroup = new Group();
+  /**
+   * The six sky faces. Turned only to preview a new panorama heading while its slider moves (PLAN §13.7);
+   * the hero is outside it, because a new heading moves the sky, not the hero.
+   */
+  private readonly skyFaces = new Group();
   private readonly faces = new Map<FaceName, Mesh<PlaneGeometry, MeshBasicMaterial>>();
   /** Nuit's per-layer mapping M (BRIEF §4.5), applied before the spin. */
   private readonly heroGroup = new Group();
@@ -102,8 +115,9 @@ export class SkyScene {
       mesh.renderOrder = ORDER_SKY;
       mesh.name = `face_${face.name}`;
       this.faces.set(face.name, mesh);
-      this.spinGroup.add(mesh);
+      this.skyFaces.add(mesh);
     }
+    this.spinGroup.add(this.skyFaces);
 
     this.hero.renderOrder = ORDER_HERO;
     this.hero.name = 'hero';
@@ -120,9 +134,10 @@ export class SkyScene {
 
   /**
    * Crops each cell of the atlas onto its own canvas, so nothing bleeds between cells.
-   * The caller checks the 3:2 shape first (math.atlasLayout).
+   * The caller checks the 3:2 shape first (math.atlasLayout). A new atlas ends any preview turn.
    */
   setAtlas(image: CanvasImageSource, faceSize: number): void {
+    this.skyFaces.rotation.y = 0;
     const size = Math.min(faceSize, this.renderer.capabilities.maxTextureSize);
     for (const face of FACES) {
       const canvas = document.createElement('canvas');
@@ -189,6 +204,15 @@ export class SkyScene {
 
   setView(view: ViewState): void {
     applyCameraView(this.camera, view.yawDeg, view.pitchDeg, view.fovDeg);
+    this.requestRender();
+  }
+
+  /**
+   * Turns the sky faces (not the hero) by a bearing, clockwise from above. Turning an atlas converted with
+   * left-edge bearing λ0 by Δ shows what converting with λ0 + Δ gives, at once (view.test.ts checks this).
+   */
+  setSkyTurnDeg(turnDeg: number): void {
+    this.skyFaces.rotation.y = skyTurnRotationY(turnDeg);
     this.requestRender();
   }
 
