@@ -669,9 +669,11 @@ convert a panorama to an atlas in the browser. This reverses the old BRIEF §10 
 atlases"; BRIEF §8, §10, §13 and §14 are updated.
 
 **Decisions (2026-10-12):** the dropdown has **Auto (by shape)** as its default, plus Atlas and Panorama. The
-left-edge bearing is **not** a UI field: it is the constant `PANO_LEFT_BEARING_DEG` (−135°, `sky_convert.py`'s
-convention) and an optional parameter of the conversion, so a field can be added later in one line. The `sky_convert.py`
-cross-check was run in a throwaway venv in the session scratchpad, and its output is committed as test fixtures.
+left-edge bearing **is** a UI field (section 13.7), defaulting to `PANO_LEFT_BEARING_DEG` (−135°, `sky_convert.py`'s
+convention). It was left out at first, then added back: on a computer without the Python scripts the sky must be
+adjustable by eye, and as free software the tool should handle panoramas from other tools, which often put north in
+the middle (−180°). The `sky_convert.py` cross-check was run in a throwaway venv in the session scratchpad, and its
+output is committed as test fixtures.
 
 ### 13.1 Convention: the same as `reference/sky_convert.py`
 
@@ -682,8 +684,8 @@ the panorama at a different heading or mirror it. So the browser port uses the s
 - Column $x = 0$ is the south-west corner (bearing $\lambda_0 = -135°$), and $x$ grows turning right (clockwise
   from above). So the face centres W, N, E, S sit at $\tfrac{W}{8}, \tfrac{3W}{8}, \tfrac{5W}{8}, \tfrac{7W}{8}$.
 - Row $y = 0$ is straight up, $y = \tfrac{H}{2}$ the horizon, $y = H$ straight down.
-- A panorama made with another convention comes out turned. Shift its columns in an image editor first, or add the
-  left-edge field (see the decisions above).
+- A panorama made with another convention comes out turned; the left-edge field (section 13.7) turns it back.
+  A mirrored panorama has to be flipped in an image editor first.
 
 ### 13.2 The conversion, step by step (`math.panoramaToAtlas`, pure)
 
@@ -738,6 +740,7 @@ Sky       [ Auto (by shape) ▾ ]  [Choose file]
           status: pano.png · 8192 × 4096 panorama → atlas 6144 × 4096 (faces 2048 px) · 3.1 s
           ── while the sky comes from a panorama ──
           Face size  [ 2048 ]
+          Left edge  [────●────] [ -135 ]
           [ Download atlas (PNG) ]
 ```
 
@@ -771,6 +774,35 @@ The planned seam test was not needed as a separate test: the fixtures cross ever
 
 A small milestone of its own, on branch `pano-input`, after M3 and before M4. `sky_convert.py` stays for offline and
 batch use (including atlas → panorama), and as the reference for the convention.
+
+### 13.7 Left edge field, with a live preview
+
+A slider (−180° to 180°) with a number box, shown with the face size, plus a hint: `sky_convert.py` uses −135°, and
+tools that put north in the middle need −180°. It carries over to the next panorama (which usually comes from the
+same tool) until Reset.
+
+Re-converting on every slider movement would take seconds each time, so the slider **previews by turning the sky**
+while it moves, and converts when let go. The number box converts when committed. This works because changing the
+left edge by $\Delta$ is the same as turning the whole sky by $\Delta$ about the vertical:
+
+1. An atlas converted with $\lambda_0$ shows, in direction $\mathbf w$, the panorama at bearing
+   $\lambda(\mathbf w) - \lambda_0$ (13.2 step 4).
+2. The preview turns the sky faces by $R$, a turn of $\Delta$ clockwise from above, so the viewer looking along
+   $\mathbf w$ sees the atlas at $R^{-1}\mathbf w$, whose bearing is $\lambda(\mathbf w) - \Delta$.
+3. So the preview shows the panorama at $\lambda(\mathbf w) - \Delta - \lambda_0 = \lambda(\mathbf w) - (\lambda_0 + \Delta)$:
+   exactly what converting with $\lambda_0 + \Delta$ gives. Elevations don't change.
+
+`scene.setSkyTurnDeg(Δ)` turns only the `skyFaces` group, so the hero, whose place comes from its JSON, stays put. In
+Three.js that is `rotation.y = −Δ` (`scene.skyTurnRotationY`), because a positive angle turns counter-clockwise. A new
+atlas resets the turn. `view.test.ts` checks the equivalence for several $\Delta$ and directions, and that +90°
+turns north to east.
+
+### 13.8 Reset
+
+A **Reset sky and hero** button in the panel's title row puts back the starting state: the sample atlas (type Auto,
+left edge −135°, default face size), the test card, and every hero setting, including the mode, texture path and
+layer. The camera stays where it is. It asks for confirmation first, because there is no undo and the JSON can't be
+copied out until M4. Both file pickers are emptied, so they don't name files that are no longer shown.
 
 ---
 

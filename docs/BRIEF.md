@@ -330,11 +330,15 @@ then ×1.15 or ×1.5. In the file, `k` values are given unrounded; use them as-i
   shape)** (the default), **Atlas** or **Panorama**. An atlas must be 3:2. A
   panorama must be 2:1 equirectangular; it is converted to an atlas in the browser
   with exactly `reference/sky_convert.py`'s convention (left edge = south-west),
-  with an editable face size (default width ÷ 4, at most 2730), and the result can
+  with an editable face size (default width ÷ 4, at most 2730) and an editable
+  left-edge bearing (default −135°) that previews live, so the sky can be lined up
+  by eye for panoramas made with other tools, and the result can
   be downloaded as a PNG for the pack (PLAN §13). Reject anything else with a clear
   message. Default to `reference/samples/placeholder_atlas.png`.
 - **Hero image:** file picker plus drag-and-drop. Read its width and height
   automatically, with manual override fields. Respect alpha.
+- **Reset:** one button puts back the sample sky, the test card and every hero
+  setting, after a confirmation (PLAN §13.8).
 - Everything runs locally in the browser. Use object URLs; never upload anything.
 
 ### Controls
