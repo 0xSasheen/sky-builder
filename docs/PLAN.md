@@ -1,7 +1,8 @@
 # Sky Builder: implementation plan
 
-Status: **M1–M3 done and merged to `main`. Panorama input (section 13) done on branch `pano-input`**, awaiting review.
-Next: M3½ (in-game check A), then M4. Decisions are in sections 11–13.
+Status: **M1–M3 and the panorama input (section 13) are done and merged to `main` (2026-10-12).** The developer has
+tested panorama conversion and the left edge; the remaining hand checks and in-game check A (section 10) are next,
+then M4. Decisions are in sections 11–13.
 
 Contents: 1. Source verification · 2. Architecture · 3. Types · 4. `math.ts` API and tests ·
 5. JSON output · 6. Rendering · 7. Time spin · 8. UI · 9. Milestones ·
