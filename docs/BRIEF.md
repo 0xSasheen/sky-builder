@@ -414,6 +414,9 @@ to each constraint limit, and warnings when a §6.1 constraint is broken.
 - Editing the sky atlases themselves.
 - Any server or backend. The tool is a static site.
 
+**Maybe later (back burner):** a heading control for sky *atlases*, like the
+panorama's left edge. It needs atlas → panorama → atlas resampling.
+
 **Stretch goals (after M5):** day/night crossfade preview; several heroes (each
 would be its own layer file, since `mapping` is per layer); remembering the
 last settings in `localStorage`.
@@ -452,8 +455,9 @@ Raise these in the plan. Don't guess silently. Status as of 2026-10-11:
 1. **Sign of mapping X.** ✅ Closed. Positive X tilts the North face **up**. The
    source says so, and the running config (X = +22.47, hero above the horizon)
    confirms it in game.
-2. **Sign of mapping Y.** ⏳ Source says positive Y turns the hero toward the
-   **west**. Awaiting one in-game check (PLAN §10).
+2. **Sign of mapping Y.** ✅ Closed. Positive Y turns the hero toward the
+   **west**. The source says so, and in game (PLAN §10 check A) mapping
+   [22.47, 30, 0] put the hero about 30° left of north while facing north.
 3. **Spin direction and phase.** ✅ Closed from source and vanilla 26.2 data;
    see §4.7.
 4. **Bottom face orientation.** ✅ Closed from source; see §3.

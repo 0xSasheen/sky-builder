@@ -169,7 +169,7 @@ describe('hero placement (BRIEF §9, M3 check)', () => {
     }
   });
 
-  it('+Y turns the hero toward west (pending in-game check A)', () => {
+  it('+Y turns the hero toward west (confirmed in game, PLAN §10 check A)', () => {
     const json = buildSky3(params(cases[2], { mappingYDeg: 30 }));
     const centre = new Vector3(0, 0, -1).applyMatrix4(heroGroupMatrix(json));
     expect(bearingDeg(centre)).toBeCloseTo(-30, 9);

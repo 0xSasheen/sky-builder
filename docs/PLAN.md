@@ -1,8 +1,7 @@
 # Sky Builder: implementation plan
 
-Status: **M1–M3 and the panorama input (section 13) are done and merged to `main` (2026-10-12).** The developer has
-tested panorama conversion and the left edge; the remaining hand checks and in-game check A (section 10) are next,
-then M4. Decisions are in sections 11–13.
+Status: **M1–M3 and the panorama input (section 13) are done and merged to `main`; in-game check A confirmed the
+mapping-Y sign.** M4 is planned in section 14 and awaits approval. Decisions are in sections 11–14.
 
 Contents: 1. Source verification · 2. Architecture · 3. Types · 4. `math.ts` API and tests ·
 5. JSON output · 6. Rendering · 7. Time spin · 8. UI · 9. Milestones ·
@@ -573,7 +572,7 @@ Import by paste or file).
 | **M1 Math** | `npm i -D vitest`; add `"strict": true` to tsconfig (the scaffold omits it); `constants.ts`, `math.ts`, `schema.ts`, `json.ts`; the three test files | `npx vitest` green: all 7 vectors, case 3 byte-identical, face matrices match Nuit |
 | **M2 Sky** | remove scaffold (counter, assets, style); `vite.config.ts` with `base: '/sky-builder/'`; `scene.ts` sky cube; `view.ts` drag-look; overlay | BRIEF M2 visual checks |
 | **M3 Hero** | hero from JSON, `ui.ts` hero controls, readouts, warnings, wall-mode toggle (its math is done in M1) | BRIEF M3 check at T = 6000 |
-| **M3½ In-game check** | *You* run section 10 (about 5 minutes); I flip `SIGN_MAPPING_Y` if needed | Y sign confirmed |
+| **M3½ In-game check** | *You* run section 10 (about 5 minutes); I flip `SIGN_MAPPING_Y` if needed | Y sign confirmed ✅ (hero on the left, as predicted) |
 | **M4 Time and I/O** | time slider, play/pause, spin; Copy and Download; mcmeta; import (pinned, aspect warning) | export → import → export identical |
 | **M5 Polish** | drag-and-drop; `localStorage` (view and hero params, try/catch); Pages build; README with screenshots | `npm run build` + `vite preview` at `/sky-builder/` |
 | *After M5* | day/night crossfade (`fadeAlpha`); several heroes (one layer file each) | |
@@ -589,7 +588,9 @@ environment, §3, §4.5–4.7, §6.1, §7, §8, §9 colour, §10, §11, §12 sta
 
 Only two things are left that the source can't settle. Both use the working pack in a creative world.
 
-**A. Sign of mapping Y** (BRIEF §12.2)
+**A. Sign of mapping Y** (BRIEF §12.2). *Done: the hero appeared on the left, as predicted, so `SIGN_MAPPING_Y`
+stays +1. Measured against the NE label in the developer's screenshot, the circle's centre was about 29° west of
+north and 21° up, against a prediction of 30° and 22.47°.*
 
 1. In `sky3_image.json`, change `"mapping": {"0": [22.47, 0.0, 0.0]}` to `[22.47, 30.0, 0.0]`.
 2. In game, press **F3+T** to reload resource packs, then run `/time set noon`.
@@ -616,7 +617,7 @@ download is harmless but unnecessary.
 | # | Topic | Decision |
 |---|---|---|
 | 1 | Mapping X sign | **Closed.** `SIGN_MAPPING_X = +1`. The source agrees with the running config, so no further in-game test is needed. |
-| 2 | Mapping Y sign and UI | The slider is the **raw mapping Y** (positive = west), with a noon-bearing readout. `SIGN_MAPPING_Y = +1`, pending check A in section 10. |
+| 2 | Mapping Y sign and UI | The slider is the **raw mapping Y** (positive = west), with a noon-bearing readout. `SIGN_MAPPING_Y = +1`, **confirmed in game** (check A in section 10). |
 | 3 | Spin | **Vanilla 26.2 curve** (cubic Bézier from `day.json`), with no linear option. Target: plain Nuit and vanilla 26.x, no datapacks. Time defaults to 6000. |
 | 4 | Bottom face | **Closed** (source-verified, §1.4). |
 | 5 | mcmeta | Keep the download. **Closed from source on 2026-10-11** (section 1.6): the file is applied, and check B in section 10 is optional. |

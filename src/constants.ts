@@ -9,7 +9,7 @@ import type { FaceDef } from './schema.ts';
 
 /** Closed: +X tilts the North face up (source + running config agree, BRIEF §12.1). */
 export const SIGN_MAPPING_X = 1;
-/** Pending in-game check A (PLAN §10): source says +Y turns the hero toward west. */
+/** Confirmed in game (PLAN §10 check A): +Y turns the hero toward west, as the source says. */
 export const SIGN_MAPPING_Y = 1;
 
 // --- Cube faces (BRIEF §3) ---------------------------------------------------
