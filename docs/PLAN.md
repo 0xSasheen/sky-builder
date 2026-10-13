@@ -1,7 +1,8 @@
 # Sky Builder: implementation plan
 
-Status: **M1–M3 and the panorama input (section 13) are done and merged to `main`; in-game check A confirmed the
-mapping-Y sign.** M4 is planned in section 14 and awaits approval. Decisions are in sections 11–14.
+Status: **M1–M3 and the panorama input (section 13) are merged to `main`; in-game check A confirmed the mapping-Y
+sign. M4 (section 14) is done on branch `m4-time-io`**, awaiting the developer's test. Next: M5. Decisions are in
+sections 11–14.
 
 Contents: 1. Source verification · 2. Architecture · 3. Types · 4. `math.ts` API and tests ·
 5. JSON output · 6. Rendering · 7. Time spin · 8. UI · 9. Milestones ·
@@ -395,6 +396,8 @@ All angles in the API are in **degrees**. Conversion to radians happens inside e
 | `panoramaLayout(W, H)` | default face size, or an error message | requires $W = 2H$; $F = \operatorname{round}(W/4)$ within `PANO_FACE_RANGE`. Section 13 |
 | `directionToPanorama(d, W, H, λ0?)` | `{x, y}` | section 13.2 steps 3–4 |
 | `panoramaToAtlas(pano, F, λ0?, onFace?)` | `RgbaImage` | section 13.2; a port of `sky_convert.py`'s `pano_to_atlas` |
+| `advanceTicks(T, Δt, r)` | ticks | $(T + r\,\Delta t) \bmod 24000$, for Play. Section 14.1 |
+| `importAspectMismatch(W, H, uv)` | `{image, json}` or null | the image's $W/H$ against `aspectFromUv(uv)`, when they differ by more than 1 %. Section 14.3 |
 
 The `aspectFromUv` derivation, step by step:
 the hero spans $s \in [-ak, ak]$, so its width in $s$ is $2ak$. Since $s = 6(u - \tfrac13) - 1$,
@@ -806,7 +809,7 @@ left edge −135°, default face size), the test card, and every hero setting, i
 layer. The camera stays where it is. It asks for confirmation first, because there is no undo and the JSON can't be
 copied out until M4. Both file pickers are emptied, so they don't name files that are no longer shown.
 
-## 14. M4: time and I/O (approved, with the condensed time row below)
+## 14. M4: time and I/O (approved, with the condensed time row below; built on branch `m4-time-io`)
 
 BRIEF §14 M4: the time-of-day spin with play/pause; Copy and Download; the `.mcmeta` download; and JSON import that
 restores the sliders, with export → import → export identical. The JSON side (`serializeSky3`, `parseSky3`,
@@ -897,6 +900,27 @@ Drag-and-drop and `localStorage` (M5), the day/night crossfade (stretch goal), a
 
 1. Playback speeds of 10 s, 60 s (default) and 20 min per day: approved.
 2. A texture-path problem also triggers the export confirm, because Minecraft won't find the texture: approved.
+
+### 14.7 As built
+
+- **Where the code is.** `math.advanceTicks` and `math.importAspectMismatch`; `json.exportProblems`, `json.applyImport` and
+  `json.editPinned`; the play loop, export and import in `main.ts`; the controls in `ui.ts`.
+  `main.updateHero(patch, fromImage)` keeps a pinned JSON when the patch only touches `texture` or `layer`, or when it
+  comes from loading a hero image; anything else regenerates the JSON and unpins it.
+- **Play.** It schedules the next frame before updating, so `updateView` sees the loop running. Each frame advances by
+  at most 0.25 s, so returning to a hidden tab doesn't jump the sky. Moving the time slider pauses.
+- **Checked in headless Edge:**
+  - Tick 18 000 followed by "Look at hero" gives bearing 180, and Play at 10 s/day advanced the clock.
+  - Download gave files byte-identical to the pack's `sky3_image.json` (case 3) and `hero.png.mcmeta`.
+  - With a red error, Copy and Download both listed the problems, and did nothing when declined.
+  - Importing the pack file, by file or by paste, reproduced it byte for byte. Editing the texture while pinned changed
+    only the texture line. Moving Bottom unpinned it. Loading a 300 × 400 image while pinned kept the JSON and showed the
+    aspect note. `sky1_night.json` was refused with the type error.
+  - A real click on Copy put the JSON on the clipboard.
+- **Clipboard line endings.** On Windows the clipboard turns each line break into CRLF, so pasted text has CRLF; it is
+  otherwise identical (checked). Minecraft's JSON reader ignores this. **Download** gives the exact bytes.
+- **Fixes found in testing.** "The hero faces …" now judges "due south" on the shown, rounded value (at midnight the
+  bearing is a hair off 180°). The export note now clears when the JSON changes.
 
 ---
 
