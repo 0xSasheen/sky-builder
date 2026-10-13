@@ -806,6 +806,98 @@ left edge −135°, default face size), the test card, and every hero setting, i
 layer. The camera stays where it is. It asks for confirmation first, because there is no undo and the JSON can't be
 copied out until M4. Both file pickers are emptied, so they don't name files that are no longer shown.
 
+## 14. M4: time and I/O (approved, with the condensed time row below)
+
+BRIEF §14 M4: the time-of-day spin with play/pause; Copy and Download; the `.mcmeta` download; and JSON import that
+restores the sliders, with export → import → export identical. The JSON side (`serializeSky3`, `parseSky3`,
+`HERO_MCMETA`) has existed and been tested since M1; M4 adds the UI and the time controls. It builds on section 7 (time),
+section 8 (UI) and decision 11.9 (import pins the JSON).
+
+### 14.1 Time of day (preview only)
+
+```
+Time   [▶] [────|────●────|────|────] [ 60 s/day ▾ ]
+       12:00 · θ 0.0° · the hero faces due north
+```
+
+*Condensed at the developer's request:* one row with play/pause, the slider and the speed. The slider has
+tick marks (a `<datalist>`) at 0, 6000, 12 000 and 18 000, which Chrome and Edge snap to when dragged close, in place of
+quick buttons and a number box. The arrow keys move it one tick at a time.
+
+- A slider from 0 to 23 999 ticks. The readout shows the clock (`ticksToClock`), θ (`sunAngleDeg`), and
+  where the hero faces now: the bearing of `heroCentreDirection(uv, mapping, θ)` (`viewToward`), in quadrant form.
+  At noon this matches the existing noon readout.
+- **Play/pause**, with speeds of 1 day per 10 s, per 60 s (the default, as section 7 planned), or per 20 min (real game
+  speed, 20 ticks/s). Each animation frame advances $T \leftarrow (T + r\,\Delta t) \bmod 24000$, where $r$ is ticks
+  per second and $\Delta t$ the frame time in seconds (`math.advanceTicks`). The loop runs only while playing; it's
+  like a `javax.swing.Timer` that fires once per screen refresh. Moving the time slider pauses.
+- The spin already turns `spinGroup` (sky and hero). The cyan world overlay stays fixed, so the sky and hero can be
+  watched passing N, E, S and W. "Look at hero" already allows for θ.
+- Time is preview only: it never reaches the JSON.
+
+### 14.2 Export
+
+```
+[ Copy ]  [ Download sky3_image.json ]  [ Download hero.png.mcmeta ]
+```
+
+- **Copy** puts `serializeSky3(json)` on the clipboard (`navigator.clipboard.writeText`, which is asynchronous, like a
+  `CompletableFuture`) and shows "Copied" briefly. If the browser refuses, the JSON text is selected and the
+  message says to press Ctrl+C.
+- **Download** saves exactly those bytes, ending in one newline, as `sky3_image.json`. The `.mcmeta` button saves
+  `HERO_MCMETA`, named after the texture (`mcmetaFileName`, e.g. `hero.png.mcmeta`).
+- **Allowed, with a warning** (decision 2026-10-12): someone may want only part of the pipeline. If the JSON has a red
+  error (`outsideCell`, `zenith` or `empty`) or the texture path has a problem, Copy and Download JSON first show a
+  confirm dialog listing them, ending "Export anyway?". Amber warnings don't ask, as they're already on screen. The
+  `.mcmeta` download never asks. `json.exportProblems(readouts, textureProblem)` builds the list, as a pure function.
+
+### 14.3 Import
+
+```
+Import  [Choose .json]   ▸ Paste JSON   (opens a text box and an [Import] button)
+        status, and any warnings, listed below
+```
+
+- A `.json` file or pasted text goes through `parseSky3`. On errors nothing changes, and the errors are listed in red.
+- On success (decision 11.9, "pinned"):
+  1. `state.json` becomes the parsed JSON: `uvRange` and mapping exactly as loaded, fixed fields normalised.
+     `state.pinned = true`.
+  2. The controls show the recovered values (§6.3), including texture and layer. The hero image and W × H stay, as
+     they aren't in the JSON.
+  3. The panel says "Imported <name>. The JSON stays exactly as loaded until you move a size or position control",
+     followed by `parseSky3`'s warnings (amber).
+  4. If the loaded hero image's aspect differs from `aspectFromUv(uv)` by more than 1 %, it warns that the JSON was made
+     for a different image, and that moving a size control refits it to this one.
+  5. A range that fits neither mode keeps the current mode; only ψ is recovered. The preview shows the range as it is.
+- **What unpins.** Size and position controls (mode, β/k, scale, b, t_t, ψ, W × H) regenerate the JSON from the
+  controls, as now. **Texture and layer edits don't unpin**: they change those two fields of the pinned JSON
+  and leave its `uvRange` and mapping untouched. Otherwise renaming the texture could shift a last digit, because
+  recovering k from a rounded V is only good to $2 \times 10^{-4}$ (section 2). Reset also unpins.
+- Export → import → export is identical by construction, because the JSON is pinned. `json.test.ts` already checks this
+  for all 7 cases.
+
+### 14.4 Tests
+
+- `math.advanceTicks`: wraps around (23 990 + 20 ticks → 10), for each speed.
+- `json.exportProblems`: lists red errors and the texture problem, and not amber warnings.
+- `json.applyImport(hero, parsed)` and `json.editPinned(json, {texture, layer})`, both pure: the round trip, and a
+  texture edit while pinned leaving the `uvRange` and mapping bytes unchanged.
+- In headless Edge:
+  - Tick 18 000 → "Look at hero" gives bearing 180, and Play advances the clock.
+  - Copy (with clipboard permission) and the downloads give bytes identical to the pack's `sky3_image.json` (case 3)
+    and `hero.png.mcmeta`.
+  - Importing the pack's `sky3_image.json` shows case 3's values and identical JSON.
+  - Importing `sky1_night.json` is refused, with the type error.
+
+### 14.5 Not in M4
+
+Drag-and-drop and `localStorage` (M5), the day/night crossfade (stretch goal), and the atlas heading control (maybe later).
+
+### 14.6 Decisions
+
+1. Playback speeds of 10 s, 60 s (default) and 20 min per day: approved.
+2. A texture-path problem also triggers the export confirm, because Minecraft won't find the texture: approved.
+
 ---
 
 *Sources checked:* the Nuit 26.2/dev files listed above; vanilla 26.2 `data/minecraft/timeline/day.json` via
