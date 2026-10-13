@@ -291,3 +291,8 @@ export function editPinned(json: Sky3Json, patch: { texture?: string; layer?: nu
   return makeSky3(entry.uvRange, json.properties.rotation.mapping['0'],
     patch.texture ?? entry.texture, patch.layer ?? json.properties.layer);
 }
+
+/** Whether a dropped file is a JSON file, by its type or its name (PLAN §15.1). Browsers often leave the type empty. */
+export function isJsonFile(name: string, mimeType: string): boolean {
+  return mimeType === 'application/json' || /\.json$/i.test(name);
+}

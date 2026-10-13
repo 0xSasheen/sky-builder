@@ -3,7 +3,7 @@ import sky1Text from '../reference/pack-example/assets/nuit/sky/sky1_night.json?
 import sky3Text from '../reference/pack-example/assets/nuit/sky/sky3_image.json?raw';
 import mcmetaText from '../reference/pack-example/assets/sasheen/textures/sky/hero.png.mcmeta?raw';
 import {
-  applyImport, buildSky3, editPinned, exportProblems, fmtFloat, HERO_MCMETA, makeSky3, mcmetaFileName, parseSky3,
+  applyImport, buildSky3, editPinned, exportProblems, fmtFloat, HERO_MCMETA, isJsonFile, makeSky3, mcmetaFileName, parseSky3,
   serializeSky3, textureProblem, type ParseResult,
 } from '../src/json.ts';
 import { analyse, tiltedMappingX, tiltedUv } from '../src/math.ts';
@@ -172,5 +172,15 @@ describe('export and import in the UI (PLAN §14)', () => {
       .replace('"layer": 3,', '"layer": 4,');
     expect(edited).toBe(expected);
     expect(serializeSky3(editPinned(parsed.json, {}))).toBe(sky3Text);
+  });
+});
+
+describe('dropped files (PLAN §15.1)', () => {
+  it('recognises JSON by type or by name', () => {
+    expect(isJsonFile('sky3_image.json', '')).toBe(true);
+    expect(isJsonFile('SKY3.JSON', '')).toBe(true);
+    expect(isJsonFile('pasted', 'application/json')).toBe(true);
+    expect(isJsonFile('hero.png', 'image/png')).toBe(false);
+    expect(isJsonFile('notes.json.txt', 'text/plain')).toBe(false);
   });
 });
