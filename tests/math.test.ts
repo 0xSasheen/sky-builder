@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { K_RANGE } from '../src/constants.ts';
+import { K_RANGE, PLAY_SPEEDS } from '../src/constants.ts';
 import {
-  analyse, applyMapping, aspectFromUv, atlasLayout, atlasPointToCube, clampHero, clampPitch, faceToNorthUv,
+  advanceTicks, analyse, applyMapping, importAspectMismatch, aspectFromUv, atlasLayout, atlasPointToCube, clampHero, clampPitch, faceToNorthUv,
   heightFromK, heroCentreDirection, heroPieces, kFromHeight, mcFacing, mcYawPitch, northUvToFace, noonBearingDeg,
   quadrantBearing, recoverParams, roundTo, scaleK, solveHero, sunAngleDeg, tiltedMappingX, tiltedUv, ticksToClock,
   uvRangeToFaceRect, viewToward, wallUv,
@@ -341,5 +341,32 @@ describe('directions (BRIEF §4.5, §4.6)', () => {
     expect(quadrantBearing(-90)).toEqual({ from: 'N', deg: 90, to: 'W' });
     expect(quadrantBearing(0)).toEqual({ from: 'N', deg: 0, to: 'E' });
     expect(quadrantBearing(180)).toEqual({ from: 'S', deg: 0, to: 'E' });
+  });
+});
+
+describe('play (PLAN §14.1)', () => {
+  it('advances by ticks per second, wrapping at the end of the day', () => {
+    expect(advanceTicks(6000, 1, 400)).toBe(6400);
+    expect(advanceTicks(23990, 1, 20)).toBe(10);
+    expect(advanceTicks(100, 0, 2400)).toBe(100);
+  });
+
+  it('each speed takes the stated time per day', () => {
+    for (const { label, ticksPerSecond } of PLAY_SPEEDS) {
+      const seconds = label.startsWith('10 s') ? 10 : label.startsWith('60 s') ? 60 : 20 * 60;
+      expect(advanceTicks(6000, seconds, ticksPerSecond)).toBeCloseTo(6000, 9);
+      expect(advanceTicks(6000, seconds / 2, ticksPerSecond)).toBeCloseTo(18000, 9);
+    }
+  });
+});
+
+describe('import aspect check (decision 11.9)', () => {
+  it('is quiet for the image a JSON was made for, and reports a different one', () => {
+    const uv = cases[2].expected.uvRange; // case 3, made for 1063 × 1502
+    expect(importAspectMismatch(1063, 1502, uv)).toBeNull();
+    expect(importAspectMismatch(2126, 3004, uv)).toBeNull(); // same shape, twice the size
+    const m = importAspectMismatch(300, 400, uv);
+    expect(m!.image).toBeCloseTo(0.75, 12);
+    expect(m!.json).toBeCloseTo(1063 / 1502, 3);
   });
 });

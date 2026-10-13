@@ -2,9 +2,9 @@
 // All angles in this API are degrees; conversion to radians happens inside each function.
 
 import {
-  CENTRE_TOLERANCE, FACE_HARD_LIMIT, FACE_WARN_LIMIT, FACES, K_RANGE, MAPPING_DECIMALS, NOON_TICK, PANO_FACE_RANGE,
-  PANO_LEFT_BEARING_DEG, PITCH_LIMIT_DEG, RANGES, SIGN_MAPPING_X, SIGN_MAPPING_Y, SUN_ANGLE_BEZIER, TICKS_PER_DAY,
-  UV_DECIMALS, ZENITH_DEG,
+  CENTRE_TOLERANCE, FACE_HARD_LIMIT, FACE_WARN_LIMIT, FACES, IMPORT_ASPECT_TOLERANCE, K_RANGE, MAPPING_DECIMALS,
+  NOON_TICK, PANO_FACE_RANGE, PANO_LEFT_BEARING_DEG, PITCH_LIMIT_DEG, RANGES, SIGN_MAPPING_X, SIGN_MAPPING_Y,
+  SUN_ANGLE_BEZIER, TICKS_PER_DAY, UV_DECIMALS, ZENITH_DEG,
 } from './constants.ts';
 import type {
   AtlasLayout, FaceRect, HeroParams, HeroPiece, Readouts, RgbaImage, SkyKind, UvRange, Vec3, Warning,
@@ -145,6 +145,16 @@ export function aspectFromUv(uv: UvRange): number {
 }
 
 /**
+ * For an imported JSON (PLAN §14.3): the aspects of the hero image and of the uvRange, when they differ by more
+ * than IMPORT_ASPECT_TOLERANCE; null when they agree, as for a JSON made for this image.
+ */
+export function importAspectMismatch(imageW: number, imageH: number, uv: UvRange): { image: number; json: number } | null {
+  const image = imageW / imageH;
+  const json = aspectFromUv(uv);
+  return Math.abs(image / json - 1) > IMPORT_ASPECT_TOLERANCE ? { image, json } : null;
+}
+
+/**
  * Readouts for what Nuit will draw. Elevations are measured along the hero's vertical
  * centre line; the width is measured across its middle row.
  */
@@ -234,6 +244,11 @@ export function recoverParams(uv: UvRange, mapping: Vec3): Partial<HeroParams> {
 }
 
 // --- Time (BRIEF §3, §4.7) -------------------------------------------------------
+
+/** Play: T ← (T + r·Δt) mod 24000, for r ticks per second over Δt seconds (PLAN §14.1). */
+export function advanceTicks(ticks: number, seconds: number, ticksPerSecond: number): number {
+  return mod(ticks + ticksPerSecond * seconds, TICKS_PER_DAY);
+}
 
 /** Clock time for a tick: hour = (6 + T/1000) mod 24. */
 export function ticksToClock(ticks: number): { h: number; m: number } {

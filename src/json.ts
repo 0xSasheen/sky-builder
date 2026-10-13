@@ -1,8 +1,8 @@
 // Build, serialise and import sky3_image.json (BRIEF §5, PLAN §5).
 
 import { DEFAULTS, FIXED_JSON } from './constants.ts';
-import { classifyUv, recoverParams, solveHero } from './math.ts';
-import type { HeroParams, Sky3Json, TickMap, UvRange, Vec3 } from './schema.ts';
+import { clampHero, classifyUv, recoverParams, solveHero } from './math.ts';
+import type { HeroParams, Readouts, Sky3Json, TickMap, UvRange, Vec3 } from './schema.ts';
 
 export const SKY3_FILENAME = 'sky3_image.json';
 
@@ -259,4 +259,35 @@ export function parseSky3(text: string): ParseResult {
     recovered: { ...recoverParams(uv, mapping), texture, layer },
     warnings,
   };
+}
+
+// --- Export and import in the UI (PLAN §14) ------------------------------------------------
+
+/**
+ * What to confirm before Copy or Download (PLAN §14.2): every red error, and a texture path Minecraft
+ * would not find. Amber warnings are left out, as they are on screen already. Empty means export at once.
+ */
+export function exportProblems(readouts: Readouts, textureProblem: string | null): string[] {
+  return [
+    ...readouts.warnings.filter((w) => w.level === 'error').map((w) => w.message),
+    ...(textureProblem ? [`Texture: ${textureProblem}`] : []),
+  ];
+}
+
+/**
+ * An imported file (PLAN §14.3): the JSON exactly as loaded becomes the output ("pinned"), and the controls
+ * show the values recovered from it. The hero image size isn't in the JSON, so it is kept.
+ */
+export function applyImport(hero: HeroParams, parsed: Extract<ParseResult, { ok: true }>): { hero: HeroParams; json: Sky3Json } {
+  return { hero: clampHero({ ...hero, ...parsed.recovered }), json: parsed.json };
+}
+
+/**
+ * Changes the texture and layer of a pinned JSON and leaves its uvRange and mapping exactly as they are,
+ * so renaming the texture can't shift a last digit (PLAN §14.3).
+ */
+export function editPinned(json: Sky3Json, patch: { texture?: string; layer?: number }): Sky3Json {
+  const entry = json.animatableTextures[0];
+  return makeSky3(entry.uvRange, json.properties.rotation.mapping['0'],
+    patch.texture ?? entry.texture, patch.layer ?? json.properties.layer);
 }

@@ -3,9 +3,10 @@ import sky1Text from '../reference/pack-example/assets/nuit/sky/sky1_night.json?
 import sky3Text from '../reference/pack-example/assets/nuit/sky/sky3_image.json?raw';
 import mcmetaText from '../reference/pack-example/assets/sasheen/textures/sky/hero.png.mcmeta?raw';
 import {
-  buildSky3, fmtFloat, HERO_MCMETA, makeSky3, mcmetaFileName, parseSky3, serializeSky3,
-  type ParseResult,
+  applyImport, buildSky3, editPinned, exportProblems, fmtFloat, HERO_MCMETA, makeSky3, mcmetaFileName, parseSky3,
+  serializeSky3, textureProblem, type ParseResult,
 } from '../src/json.ts';
+import { analyse, tiltedMappingX, tiltedUv } from '../src/math.ts';
 import { cases, params } from './vectors.ts';
 
 /** Parses the reference sky3 file, applies an edit, and imports the result. */
@@ -130,5 +131,46 @@ describe('parseSky3 (BRIEF §6.3, §8)', () => {
     expect(parseSky3(sky1Text)).toEqual({ ok: false, errors: [expect.stringContaining('"nuit:square-textured"')] });
     const r = importEdited((j) => { delete j.animatableTextures[0].uvRange; });
     expect(r.ok).toBe(false);
+  });
+});
+
+describe('export and import in the UI (PLAN §14)', () => {
+  const aspect = 1063 / 1502;
+
+  it('exportProblems lists red errors and a texture problem, not amber warnings', () => {
+    expect(exportProblems(analyse(tiltedUv(aspect, 0.6), tiltedMappingX(0.6, 0), aspect), null)).toEqual([]);
+    expect(exportProblems(analyse(tiltedUv(aspect, 0.96), 0, aspect), null)).toEqual([]); // amber 'k' only
+    const bad = exportProblems(analyse(tiltedUv(aspect, 1.2), tiltedMappingX(1.2, 0), aspect), 'nope');
+    expect(bad).toEqual([expect.stringContaining('North cell'), expect.stringContaining('zenith'), 'Texture: nope']);
+  });
+
+  it('texture problems', () => {
+    expect(textureProblem('sasheen:textures/sky/hero.png')).toBeNull();
+    expect(textureProblem('hero.png')).toContain('namespace:path');
+    expect(textureProblem('Sasheen:hero.png')).toContain('namespace');
+    expect(textureProblem('sasheen:Hero Art.png')).toContain('capitals');
+    expect(textureProblem('sasheen:textures/sky/hero')).toContain('.png');
+  });
+
+  it('applyImport pins the JSON as loaded and shows the recovered values', () => {
+    const parsed = parseSky3(sky3Text);
+    if (!parsed.ok) throw new Error('expected ok');
+    const before = params(cases[0], { imageW: 1063, imageH: 1502, texture: 'x:y.png', layer: 9 });
+    const { hero, json } = applyImport(before, parsed);
+    expect(serializeSky3(json)).toBe(sky3Text);
+    expect(hero.k).toBeCloseTo(cases[2].k!, 3);
+    expect(hero.bottomDeg).toBeCloseTo(-10, 2);
+    expect(hero).toMatchObject({ mode: 'tilted', texture: 'sasheen:textures/sky/hero.png', layer: 3, imageW: 1063, imageH: 1502 });
+  });
+
+  it('editPinned changes only the texture and layer', () => {
+    const parsed = parseSky3(sky3Text);
+    if (!parsed.ok) throw new Error('expected ok');
+    const edited = serializeSky3(editPinned(parsed.json, { texture: 'sasheen:textures/sky/other.png', layer: 4 }));
+    const expected = sky3Text
+      .replace('sasheen:textures/sky/hero.png', 'sasheen:textures/sky/other.png')
+      .replace('"layer": 3,', '"layer": 4,');
+    expect(edited).toBe(expected);
+    expect(serializeSky3(editPinned(parsed.json, {}))).toBe(sky3Text);
   });
 });

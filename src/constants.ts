@@ -30,6 +30,14 @@ export const FACES: readonly FaceDef[] = [
 export const TICKS_PER_DAY = 24000;
 /** Tick at which vanilla's sun_angle is 0°, so the spin is zero. */
 export const NOON_TICK = 6000;
+/** Play speeds for the time slider (PLAN §14.1), in ticks per second. The game itself runs at 20. */
+export const PLAY_SPEEDS = [
+  { label: '10 s/day', ticksPerSecond: TICKS_PER_DAY / 10 },
+  { label: '60 s/day', ticksPerSecond: TICKS_PER_DAY / 60 },
+  { label: '20 min/day (game speed)', ticksPerSecond: 20 },
+] as const;
+/** Marks on the time slider: 6 AM, noon, 6 PM and midnight. */
+export const TIME_MARKS = [0, 6000, 12000, 18000] as const;
 /** `minecraft:visual/sun_angle` ease in vanilla 26.2 `timeline/day.json`, as [x1, y1, x2, y2]. */
 export const SUN_ANGLE_BEZIER = [0.362, 0.241, 0.638, 0.759] as const;
 
@@ -52,6 +60,8 @@ export const FACE_HARD_LIMIT = 1.0;
 export const ZENITH_DEG = 90;
 /** Tolerance in face units for "centred" after 4 dp rounding (6 · 5e-5 per edge, doubled). */
 export const CENTRE_TOLERANCE = 1e-3;
+/** An imported JSON whose aspect differs from the hero image's by more than this (relative) gets a note (decision 11.9). */
+export const IMPORT_ASPECT_TOLERANCE = 0.01;
 
 // --- Rounding (BRIEF §5) -----------------------------------------------------
 
@@ -73,6 +83,8 @@ export const DEFAULTS = {
   texture: 'sasheen:textures/sky/hero.png',
   layer: 3,
   timeTicks: NOON_TICK,
+  /** One in-game day per minute (PLAN §7). */
+  ticksPerSecond: TICKS_PER_DAY / 60,
   fovDeg: 70,
   /** The view opens looking north at the horizon. */
   yawDeg: 0,
