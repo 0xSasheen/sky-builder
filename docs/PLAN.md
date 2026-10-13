@@ -1,7 +1,8 @@
 # Sky Builder: implementation plan
 
 Status: **M1–M3 and the panorama input (section 13) are merged to `main`; in-game check A confirmed the mapping-Y
-sign. M4 (section 14) is done and merged.** M5 (section 15) is approved and in progress on branch `m5-polish`. Decisions are in
+sign. M4 (section 14) is done and merged.** M5 (section 15) is done on branch `m5-polish`, awaiting the developer's test. After the merge, GitHub Pages
+needs its one-time setting (section 15.3). Decisions are in
 sections 11–14.
 
 Contents: 1. Source verification · 2. Architecture · 3. Types · 4. `math.ts` API and tests ·
@@ -924,7 +925,7 @@ Drag-and-drop and `localStorage` (M5), the day/night crossfade (stretch goal), a
 
 ---
 
-## 15. M5: polish and publish (approved)
+## 15. M5: polish and publish (approved; built on branch `m5-polish`)
 
 BRIEF §14 M5: drag-and-drop, `localStorage`, a `vite build` that works on GitHub Pages, and a README with
 screenshots. Checked on the repo: it is public, with no licence, no README, and Pages not enabled.
@@ -991,6 +992,30 @@ screenshots. Checked on the repo: it is public, with no licence, no README, and 
 2. **Images: remembered too** (option A), in IndexedDB.
 3. **Drops: per-field targets, plus automatic routing** everywhere else.
 4. **CLAUDE.md rule 6 is updated:** both signs are confirmed, and the named constants stay.
+
+### 15.7 As built
+
+- **Drops.** `ui.ts` listens for native drag events. A counter of `dragenter`/`dragleave` outlines the rows while
+  files are over the page, and the row under the pointer lights up. `main.dropFiles` routes each file; for an image
+  dropped elsewhere it reads the size first (`createImageBitmap`) to decide between Sky and Hero. `json.isJsonFile`
+  is tested.
+- **Remembering.** `saved.ts` (pure, tested) writes and checks the settings; `imagestore.ts` keeps the last picked
+  sky file and hero image in IndexedDB. Start-up restores the settings at once, then the files: stored ones if
+  present, otherwise the samples. A remembered hero image comes back without overwriting a W × H that was typed
+  in. If the image is missing, the test card stands in at the saved size, with a note. A picked sky file is stored
+  only after it loads successfully, so a broken file isn't brought back. Reset clears the stored images.
+- **Pages.** `.github/workflows/deploy.yml` (Node 24): `npm ci`, the tests, the build, then the official
+  upload and deploy actions. `vite.config.ts` raises the chunk warning to 800 kB, and the build is clean.
+- **README.** It has three screenshots from the sample images, in `docs/screenshots/`.
+- **Checked in headless Edge, with native file drops through the DevTools protocol:**
+  - Dropped on the view: a panorama went to the Sky ("as it is 2:1"), a 300 × 400 PNG to the Hero, a JSON to Import
+    (pinned, with the aspect note), and `LICENSE` was refused.
+  - The test card dropped on the Sky row was rejected, because it isn't 3:2 or 2:1.
+  - After a reload, the panorama (left edge −150°), the hero image, the pinned import, the time, the FOV and the
+    overlay all came back.
+  - After unpinning and reloading, it stayed unpinned with ψ = 20.
+  - Reset and then a reload gave the samples and the defaults.
+- **Not yet checked:** the live site, which needs the Pages setting first.
 
 ---
 

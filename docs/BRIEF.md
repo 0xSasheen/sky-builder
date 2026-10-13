@@ -539,5 +539,5 @@ After each one, stop and report what was done and exactly how to check it.
 - **M4, Time and I/O.** Time-of-day spin with play/pause; Copy and Download;
   `.mcmeta` download; JSON import that restores the sliders (round trip:
   export → import → identical JSON).
-- **M5, Polish.** Drag-and-drop, `localStorage`, a `vite build` that works on
+- **M5, Polish** (built as PLAN §15; files are remembered too, in IndexedDB). Drag-and-drop, `localStorage`, a `vite build` that works on
   GitHub Pages, and a README with screenshots.
