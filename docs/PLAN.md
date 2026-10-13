@@ -1,7 +1,7 @@
 # Sky Builder: implementation plan
 
 Status: **M1–M3 and the panorama input (section 13) are merged to `main`; in-game check A confirmed the mapping-Y
-sign. M4 (section 14) is done on branch `m4-time-io`**, awaiting the developer's test. Next: M5. Decisions are in
+sign. M4 (section 14) is done and merged.** M5 (section 15) is approved and in progress on branch `m5-polish`. Decisions are in
 sections 11–14.
 
 Contents: 1. Source verification · 2. Architecture · 3. Types · 4. `math.ts` API and tests ·
@@ -921,6 +921,76 @@ Drag-and-drop and `localStorage` (M5), the day/night crossfade (stretch goal), a
   otherwise identical (checked). Minecraft's JSON reader ignores this. **Download** gives the exact bytes.
 - **Fixes found in testing.** "The hero faces …" now judges "due south" on the shown, rounded value (at midnight the
   bearing is a hair off 180°). The export note now clears when the JSON changes.
+
+---
+
+## 15. M5: polish and publish (approved)
+
+BRIEF §14 M5: drag-and-drop, `localStorage`, a `vite build` that works on GitHub Pages, and a README with
+screenshots. Checked on the repo: it is public, with no licence, no README, and Pages not enabled.
+
+### 15.1 Drag and drop
+
+- **On a field:** the Sky, Hero and Import rows each accept a dropped file and light up while it is dragged over them.
+  It then goes exactly where a file picked there would go.
+- **Anywhere else** (including the 3D view), each file is routed by what it is: `.json` goes to Import; an image that
+  is 3:2 or 2:1 goes to the Sky (the dropdown's type still applies), and any other image to the Hero. The status line
+  says where it went, and how to redirect it ("Loaded as the sky because it is 2:1. Drop it on the Hero row to use it as
+  the hero."). Several files can be dropped at once, such as a panorama and a hero.
+- The browser's default of opening a dropped file in place of the page is turned off.
+- The routing is a pure function, `dropTarget(name, mimeType, size)`, with tests.
+
+### 15.2 Remembering the last session
+
+- **Settings** go in `localStorage` under one versioned key (`sky-builder/v1`), saved half a second after the last
+  change: every hero control, the view (FOV, bearing, pitch, overlay, time, speed; never "playing"), the sky options
+  (type, face size, left edge), and an imported JSON while it is still pinned, with its name.
+- **Reading** is defensive: a missing, older or broken entry, or a browser that blocks storage, falls back to the
+  defaults without an error (every access is in `try/catch`). Values are clamped as if typed in. A pure module
+  `src/saved.ts` (`toSaved(state)`, `fromSaved(text)`) does the validating, with tests.
+- **Images (your choice, see 15.6):** `localStorage` holds about 5 MB, which is too small for images.
+  - *Option A, recommended:* keep the last sky file and hero image in IndexedDB, the browser's local database. It
+    has no practical size limit, and nothing leaves the browser. After a reload, everything comes back as it was;
+    a panorama is re-converted with its saved settings.
+  - *Option B:* settings only. After a reload the sample sky and test card appear. The hero's W × H keep their saved
+    values, so the JSON doesn't change, and a note asks for the hero image again.
+- **Reset** also forgets everything saved. A line in the panel says settings are remembered in this browser only.
+
+### 15.3 GitHub Pages
+
+- `.github/workflows/deploy.yml` runs on every push to `main` (and by hand): `npm ci`, `npx vitest run`,
+  `npm run build`, then the official Pages actions upload `dist/` and deploy it. A failing test stops the deploy.
+- `vite.config.ts` already sets `base: '/sky-builder/'`, so the site will be **https://0xsasheen.github.io/sky-builder/**.
+- **One step only you can do:** in the repo's Settings → Pages, set *Source* to *GitHub Actions*. The first deploy
+  runs after that, on the next push or from the Actions tab.
+- The build's "chunk over 500 kB" warning comes from Three.js itself (about 540 kB, 140 kB gzipped). For a one-page
+  tool a single file is fine, so the limit is raised to 800 kB with a comment, rather than splitting.
+- Acceptance: `npm run build` plus `npm run preview` works at `/sky-builder/` locally, and the live site loads.
+
+### 15.4 README
+
+- What it is, in one paragraph, with a screenshot, and the live link.
+- How to use it: load a sky (atlas or panorama) and a hero, place the hero, check it with the time slider, export,
+  and where the files go in a resource pack (`assets/nuit/sky/`, `assets/<namespace>/textures/sky/`).
+- What it assumes: Minecraft Java 26.2, Nuit, vanilla time of day.
+- Development: the npm commands and tests, and where the spec and plan live (`docs/BRIEF.md`, `docs/PLAN.md`).
+- Credits: Nuit by FlashyReese; `sky_convert.py`'s convention.
+- **Screenshots** go in `docs/screenshots/`, taken with headless Edge from the **sample images only** (rule 8): the
+  hero on the placeholder sky with the overlay, a panorama being converted, and the panel.
+- **A licence:** a FOSS repo needs a `LICENSE` file. Your choice (15.6).
+
+### 15.5 Housekeeping
+
+- CLAUDE.md rule 6 still says the mapping signs are unconfirmed. Both now are (BRIEF §12.1, §12.2). With your OK it will
+  say so, and still keep the named constants.
+- BRIEF §14 M5 and the PLAN status are updated at the end.
+
+### 15.6 Decisions
+
+1. **Licence: MIT.** `LICENSE` is added, with the copyright holder "Sachin".
+2. **Images: remembered too** (option A), in IndexedDB.
+3. **Drops: per-field targets, plus automatic routing** everywhere else.
+4. **CLAUDE.md rule 6 is updated:** both signs are confirmed, and the named constants stay.
 
 ---
 

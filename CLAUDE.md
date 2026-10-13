@@ -21,8 +21,10 @@ files are in `reference/` (index in BRIEF §13).
    Never use the default `'XYZ'`.
 5. **Axes:** +x = east, +y = up, −z = north. Atlas UV: u runs across 3 columns,
    v runs down 2 rows, and **V = 0 is the top**. The face table is BRIEF §3.
-6. **The in-game sign of `mapping` X and Y is not yet confirmed.** Keep both
-   signs as named constants in `src/constants.ts`, never inline.
+6. **Both `mapping` signs are confirmed** (BRIEF §12): +X tilts the North face up
+   (source and the running config), and +Y turns it toward west (source and an
+   in-game check). Still keep both signs as named constants in
+   `src/constants.ts`, never inline.
 7. **The output JSON must match BRIEF §5 exactly.** In 26.2, `"blend"` is a
    string inside `properties`; a top-level `"blend"` object is silently ignored.
 8. **Never commit third-party or personal artwork.** Real textures go in
