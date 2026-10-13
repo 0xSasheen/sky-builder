@@ -1,8 +1,10 @@
 // Controls and readouts, in plain DOM (PLAN §8). The UI never changes state itself:
 // it reports what the user did through the handlers, and main.ts calls show*() with the result.
 
-import { FACE_WARN_LIMIT, K_RANGE, PANO_FACE_RANGE, PANO_LEFT_BEARING_RANGE, RANGES } from './constants.ts';
-import { heightFromK, kFromHeight, mcFacing, mcYawPitch, noonBearingDeg, quadrantBearing } from './math.ts';
+import {
+  FACE_WARN_LIMIT, K_RANGE, PANO_FACE_RANGE, PANO_LEFT_BEARING_RANGE, PLAY_SPEEDS, RANGES, TIME_MARKS,
+} from './constants.ts';
+import { heightFromK, kFromHeight, mcFacing, mcYawPitch, noonBearingDeg, quadrantBearing, ticksToClock } from './math.ts';
 import type { HeroMode, HeroParams, Readouts, Sky3Json, SkyType, ViewState } from './schema.ts';
 
 export interface UiHandlers {
@@ -24,7 +26,15 @@ export interface UiHandlers {
   onHeroFile(file: File): void;
   /** Back to the sample sky, the test card and the starting hero settings. */
   onReset(): void;
+  onCopy(): void;
+  onDownloadJson(): void;
+  onDownloadMcmeta(): void;
+  onImportFile(file: File): void;
+  onImportText(text: string): void;
 }
+
+/** One line of the import report (PLAN §14.3). */
+export interface ImportLine { level: 'ok' | 'warn' | 'error'; text: string }
 
 /** What the hero part of the panel shows; everything after `hero` comes from the JSON object. */
 export interface HeroView {
@@ -91,6 +101,15 @@ const margin = (m: number, dp: number, limit: string, unit = ''): string => {
   return `${size}${unit} ${m > 0 ? 'inside' : 'over'} the ${limit}${unit} limit`;
 };
 
+/** "due north", "N 30.00° W", "S 12.50° E": a bearing as words. */
+function facingText(bearingDeg: number): string {
+  const q = quadrantBearing(bearingDeg);
+  const deg = fixed(q.deg, 2); // judge "due" on the shown value: at midnight the bearing is a hair off 180°
+  if (Number(deg) === 0) return `due ${q.from === 'N' ? 'north' : 'south'}`;
+  if (Number(deg) === 90) return `due ${q.to === 'E' ? 'east' : 'west'}`;
+  return `${q.from} ${deg}° ${q.to}`;
+}
+
 export class Ui {
   private readonly setYaw: (v: number) => void;
   private readonly setPitch: (v: number) => void;
@@ -111,7 +130,7 @@ export class Ui {
   private readonly faceSize = byId<HTMLInputElement>('face-size');
   private readonly leftBearing = byId<HTMLInputElement>('left-bearing');
   private readonly leftBearingNum = byId<HTMLInputElement>('left-bearing-num');
-  private readonly fileInputs = [byId<HTMLInputElement>('sky-file'), byId<HTMLInputElement>('hero-file')];
+  private readonly fileInputs = ['sky-file', 'hero-file', 'import-file'].map((id) => byId<HTMLInputElement>(id));
   private readonly panoDownload = byId<HTMLDivElement>('pano-download');
   private readonly heroStatus = byId<HTMLParagraphElement>('hero-status');
   private readonly modes = [...document.querySelectorAll<HTMLInputElement>('input[name="mode"]')];
@@ -122,6 +141,17 @@ export class Ui {
   private readonly readouts = byId<HTMLDListElement>('readouts');
   private readonly warnings = byId<HTMLUListElement>('warnings');
   private readonly jsonOut = byId<HTMLPreElement>('json-out');
+  private readonly play = byId<HTMLButtonElement>('play');
+  private readonly time = byId<HTMLInputElement>('time');
+  private readonly speed = byId<HTMLSelectElement>('speed');
+  private readonly timeReadout = byId<HTMLParagraphElement>('time-readout');
+  private readonly exportStatus = byId<HTMLParagraphElement>('export-status');
+  private readonly pinnedNote = byId<HTMLParagraphElement>('pinned-note');
+  private readonly importStatus = byId<HTMLUListElement>('import-status');
+  private readonly importText = byId<HTMLTextAreaElement>('import-text');
+  /** Whether the last view shown was playing, so the play button knows which way to toggle. */
+  private playing = false;
+  private exportStatusTimer = 0;
 
   constructor(handlers: UiHandlers) {
     // --- Preview
@@ -131,6 +161,15 @@ export class Ui {
     this.overlay.addEventListener('change', () => handlers.onView({ showOverlay: this.overlay.checked }));
     byId('look-north').addEventListener('click', () => handlers.onView({ yawDeg: 0, pitchDeg: 0 }));
     byId('look-hero').addEventListener('click', () => handlers.onLookAtHero());
+
+    // --- Time (PLAN §14.1): play/pause, one slider with marks to snap to, and the speed
+    this.time.min = String(RANGES.timeTicks.min);
+    this.time.max = String(RANGES.timeTicks.max);
+    byId<HTMLDataListElement>('time-marks').replaceChildren(...TIME_MARKS.map((ticks) => new Option('', String(ticks))));
+    this.speed.replaceChildren(...PLAY_SPEEDS.map((sp) => new Option(sp.label, String(sp.ticksPerSecond))));
+    this.play.addEventListener('click', () => handlers.onView({ playing: !this.playing }));
+    this.time.addEventListener('input', () => handlers.onView({ timeTicks: this.time.valueAsNumber, playing: false }));
+    this.speed.addEventListener('change', () => handlers.onView({ ticksPerSecond: Number(this.speed.value) }));
 
     // --- Files
     for (const [id, handler] of [['sky-file', handlers.onSkyFile], ['hero-file', handlers.onHeroFile]] as const) {
@@ -161,6 +200,18 @@ export class Ui {
       if (Number.isFinite(this.leftBearingNum.valueAsNumber)) handlers.onLeftBearing(this.leftBearingNum.valueAsNumber);
     });
     byId('download-atlas').addEventListener('click', () => handlers.onDownloadAtlas());
+    // --- Export and import (PLAN §14.2, §14.3)
+    byId('copy-json').addEventListener('click', () => handlers.onCopy());
+    byId('download-json').addEventListener('click', () => handlers.onDownloadJson());
+    byId('download-mcmeta').addEventListener('click', () => handlers.onDownloadMcmeta());
+    const importFile = byId<HTMLInputElement>('import-file');
+    importFile.addEventListener('change', () => {
+      const file = importFile.files?.[0];
+      if (file) handlers.onImportFile(file);
+      importFile.value = ''; // so choosing the same file again imports it again
+    });
+    byId('import-button').addEventListener('click', () => handlers.onImportText(this.importText.value));
+
     byId('reset').addEventListener('click', () => {
       if (window.confirm('Reset to the sample sky, the test card and the starting hero settings? '
         + 'Your current sky, hero image and settings will be replaced.')) handlers.onReset();
@@ -194,6 +245,11 @@ export class Ui {
     this.setPitch(view.pitchDeg);
     this.setFov(view.fovDeg);
     this.overlay.checked = view.showOverlay;
+    this.playing = view.playing;
+    this.play.textContent = view.playing ? '❚❚' : '▶';
+    this.play.setAttribute('aria-label', view.playing ? 'Pause' : 'Play');
+    this.time.value = String(Math.round(view.timeTicks));
+    this.speed.value = String(view.ticksPerSecond);
 
     // Also what Minecraft's F3 screen would show for the same view, to line the preview up with the game.
     const mc = mcYawPitch(view.yawDeg, view.pitchDeg);
@@ -218,11 +274,7 @@ export class Ui {
 
     // Everything below describes the JSON, the values Nuit will read.
     const [x, y] = json.properties.rotation.mapping['0'];
-    const q = quadrantBearing(noonBearingDeg(y));
-    const facing = q.deg === 0 ? `due ${q.from === 'N' ? 'north' : 'south'}`
-      : q.deg === 90 ? `due ${q.to === 'E' ? 'east' : 'west'}`
-      : `${q.from} ${fixed(q.deg, 2)}° ${q.to}`;
-    this.turnHint.textContent = `At noon the hero faces ${facing}. Positive ψ turns it toward the west.`;
+    this.turnHint.textContent = `At noon the hero faces ${facingText(noonBearingDeg(y))}. Positive ψ turns it toward the west.`;
 
     // The cell-edge limits apply to how far the hero reaches on the face, max |t| and max |s|.
     // In tilted mode those are exactly k and ak; in wall mode the top edge t_t sets the vertical one.
@@ -255,6 +307,52 @@ export class Ui {
     }));
 
     this.jsonOut.textContent = jsonText;
+  }
+
+  /** The line under the time slider: clock, the spin θ, and where the hero faces at this time. */
+  showTime(ticks: number, thetaDeg: number, heroBearingDeg: number): void {
+    const { h, m } = ticksToClock(ticks);
+    const clock = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+    this.timeReadout.textContent =
+      `${clock} (tick ${Math.round(ticks)}) · θ ${fixed(thetaDeg, 1)}° · the hero faces ${facingText(heroBearingDeg)}`;
+  }
+
+  /** Asks before exporting a JSON with problems (PLAN §14.2). True means go ahead. */
+  confirmExport(problems: readonly string[]): boolean {
+    return window.confirm(`This JSON has problems:\n\n• ${problems.join('\n• ')}\n\nExport anyway?`);
+  }
+
+  /** A short note under the export buttons; a success note clears itself after a few seconds. */
+  showExportStatus(text: string, isError = false): void {
+    window.clearTimeout(this.exportStatusTimer);
+    this.exportStatus.textContent = text;
+    this.exportStatus.classList.toggle('error', isError);
+    if (!isError && text) this.exportStatusTimer = window.setTimeout(() => this.showExportStatus(''), 3000);
+  }
+
+  /** Selects the JSON text, for copying by hand when the clipboard is refused. */
+  selectJson(): void {
+    const range = document.createRange();
+    range.selectNodeContents(this.jsonOut);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    this.jsonOut.focus();
+  }
+
+  /** The note above the JSON while it is pinned to an import; null hides it. */
+  showPinned(text: string | null): void {
+    this.pinnedNote.hidden = text === null;
+    this.pinnedNote.textContent = text ?? '';
+  }
+
+  showImportStatus(lines: readonly ImportLine[]): void {
+    this.importStatus.replaceChildren(...lines.map(({ level, text }) => {
+      const li = document.createElement('li');
+      li.className = level;
+      li.textContent = text;
+      return li;
+    }));
   }
 
   showSkyStatus(text: string, isError = false): void {

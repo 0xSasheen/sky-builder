@@ -3,16 +3,21 @@
 import './style.css';
 import placeholderAtlasUrl from '../reference/samples/placeholder_atlas.png';
 import testHeroUrl from '../reference/samples/test_hero_1063x1502.png';
-import { DEFAULTS, PANO_FACE_RANGE, PANO_LEFT_BEARING_DEG, PANO_LEFT_BEARING_RANGE, RANGES } from './constants.ts';
-import type { ConvertReply, ConvertRequest } from './convert.worker.ts';
-import { buildSky3, serializeSky3, textureProblem } from './json.ts';
 import {
-  analyse, atlasLayout, clamp, clampHero, clampPitch, heroCentreDirection, kFromHeight, panoramaLayout, scaleK,
-  skyKindFromSize, sunAngleDeg, viewToward, wrapDeg180,
+  DEFAULTS, PANO_FACE_RANGE, PANO_LEFT_BEARING_DEG, PANO_LEFT_BEARING_RANGE, RANGES, TICKS_PER_DAY,
+} from './constants.ts';
+import type { ConvertReply, ConvertRequest } from './convert.worker.ts';
+import {
+  applyImport, buildSky3, editPinned, exportProblems, HERO_MCMETA, mcmetaFileName, parseSky3, serializeSky3,
+  SKY3_FILENAME, textureProblem,
+} from './json.ts';
+import {
+  advanceTicks, analyse, atlasLayout, clamp, clampHero, clampPitch, heroCentreDirection, importAspectMismatch,
+  kFromHeight, mod, panoramaLayout, scaleK, skyKindFromSize, sunAngleDeg, viewToward, wrapDeg180,
 } from './math.ts';
 import { SkyScene } from './scene.ts';
-import type { AppState, HeroParams, SkyType, ViewState } from './schema.ts';
-import { Ui } from './ui.ts';
+import type { AppState, HeroParams, Readouts, SkyType, ViewState } from './schema.ts';
+import { Ui, type ImportLine } from './ui.ts';
 import { attachDragLook } from './view.ts';
 
 const initialHero: HeroParams = {
@@ -32,6 +37,7 @@ const state: AppState = {
   view: {
     timeTicks: DEFAULTS.timeTicks,
     playing: false,
+    ticksPerSecond: DEFAULTS.ticksPerSecond,
     fovDeg: DEFAULTS.fovDeg,
     yawDeg: DEFAULTS.yawDeg,
     pitchDeg: DEFAULTS.pitchDeg,
@@ -61,6 +67,22 @@ const ui = new Ui({
   onDownloadAtlas: () => { if (atlasPng) ui.download(atlasPng.blob, atlasPng.fileName); },
   onHeroFile: (file) => loadHero(file, file.name),
   onReset: reset,
+  onCopy: () => void copyJson(),
+  onDownloadJson: () => {
+    const text = exportText();
+    if (text !== null) ui.download(new Blob([text], { type: 'application/json' }), SKY3_FILENAME);
+  },
+  onDownloadMcmeta: () => ui.download(new Blob([HERO_MCMETA], { type: 'application/json' }),
+    mcmetaFileName(state.json.animatableTextures[0].texture)),
+  onImportFile: (file) => {
+    file.text()
+      .then((text) => importJson(text, file.name))
+      .catch(() => ui.showImportStatus([{ level: 'error', text: `${file.name} could not be read.` }]));
+  },
+  onImportText: (text) => {
+    if (text.trim() === '') ui.showImportStatus([{ level: 'error', text: 'Paste a sky3_image.json first.' }]);
+    else importJson(text, 'the pasted JSON');
+  },
 });
 
 /** The one place the view changes: wrap and clamp, then show it everywhere. */
@@ -69,31 +91,143 @@ function updateView(patch: Partial<ViewState>): void {
   view.yawDeg = wrapDeg180(view.yawDeg);
   view.pitchDeg = clampPitch(view.pitchDeg);
   view.fovDeg = clamp(view.fovDeg, RANGES.fovDeg.min, RANGES.fovDeg.max);
+  view.timeTicks = mod(view.timeTicks, TICKS_PER_DAY);
   scene.setView(view);
-  scene.setSpinDeg(sunAngleDeg(view.timeTicks)); // 0 at the default noon; the time slider arrives in M4
+  scene.setSpinDeg(sunAngleDeg(view.timeTicks)); // the daily spin, Y(θ) (BRIEF §4.7)
   scene.setOverlayVisible(view.showOverlay);
   ui.showView(view);
+  showTime();
+  syncPlayLoop();
 }
 
-/** The one place the hero changes: sliders → math → a new JSON object, which everything else reads. */
-function updateHero(patch: Partial<HeroParams>): void {
+// --- Play (PLAN §14.1) ---------------------------------------------------------------------------
+
+/** The pending animation frame while playing, 0 when stopped. */
+let playFrame = 0;
+let lastFrameTime = 0;
+
+/** Starts or stops the loop to match state.view.playing; like starting or stopping a javax.swing.Timer. */
+function syncPlayLoop(): void {
+  if (state.view.playing && playFrame === 0) {
+    lastFrameTime = performance.now();
+    playFrame = requestAnimationFrame(playStep);
+  } else if (!state.view.playing && playFrame !== 0) {
+    cancelAnimationFrame(playFrame);
+    playFrame = 0;
+  }
+}
+
+/** One frame of Play: advance the time by the frame's length. */
+function playStep(now: number): void {
+  // At most a quarter second per frame, so coming back to a hidden tab doesn't jump the sky.
+  const seconds = Math.min(Math.max(now - lastFrameTime, 0) / 1000, 0.25);
+  lastFrameTime = now;
+  playFrame = requestAnimationFrame(playStep); // schedule first, so updateView sees the loop running
+  updateView({ timeTicks: advanceTicks(state.view.timeTicks, seconds, state.view.ticksPerSecond) });
+}
+
+/** The line under the time slider, including where the hero faces at this time. */
+function showTime(): void {
+  const theta = sunAngleDeg(state.view.timeTicks);
+  const { uvRange } = state.json.animatableTextures[0];
+  const facing = viewToward(heroCentreDirection(uvRange, state.json.properties.rotation.mapping['0'], theta));
+  ui.showTime(state.view.timeTicks, theta, facing.yawDeg);
+}
+
+// --- Hero and JSON ---------------------------------------------------------------------------------
+
+/** Controls that may change a pinned (imported) JSON without regenerating its uvRange and mapping (PLAN §14.3). */
+const PINNED_SAFE: ReadonlySet<string> = new Set<keyof HeroParams>(['texture', 'layer']);
+/** The file the pinned JSON came from, for the note above it. */
+let importedName = '';
+
+/**
+ * The one place the hero changes: controls → math → a new JSON object, which everything else reads.
+ * While pinned to an import, texture and layer edits (and loading a hero image) keep the JSON as loaded;
+ * any size or position control regenerates it from the controls and unpins it.
+ */
+function updateHero(patch: Partial<HeroParams>, fromImage = false): void {
   state.hero = clampHero({ ...state.hero, ...patch });
-  state.json = buildSky3(state.hero);
-  state.pinned = false;
+  const keepPinned = state.pinned && (fromImage || Object.keys(patch).every((key) => PINNED_SAFE.has(key)));
+  if (keepPinned) {
+    state.json = editPinned(state.json, { texture: state.hero.texture, layer: state.hero.layer });
+  } else {
+    state.json = buildSky3(state.hero);
+    state.pinned = false;
+  }
   showJson();
+}
+
+/** What Nuit would draw, described: computed from the JSON object (rule 3). */
+function currentReadouts(): Readouts {
+  const { hero, json } = state;
+  const [x] = json.properties.rotation.mapping['0'];
+  return analyse(json.animatableTextures[0].uvRange, x, hero.imageW / hero.imageH);
 }
 
 function showJson(): void {
   const { hero, json } = state;
-  const [x] = json.properties.rotation.mapping['0'];
   scene.applyJson(json);
   ui.showHero({
     hero,
     json,
     jsonText: serializeSky3(json),
-    readouts: analyse(json.animatableTextures[0].uvRange, x, hero.imageW / hero.imageH),
+    readouts: currentReadouts(),
     textureProblem: textureProblem(json.animatableTextures[0].texture),
   });
+  showTime();
+  ui.showExportStatus(''); // a note about the last export no longer applies to a changed JSON
+
+  if (!state.pinned) {
+    ui.showPinned(null);
+    return;
+  }
+  let note = `Imported ${importedName}. This JSON stays exactly as loaded until you move a size or position control.`;
+  const mismatch = importAspectMismatch(hero.imageW, hero.imageH, json.animatableTextures[0].uvRange);
+  if (mismatch) {
+    note += ` It was made for an image of aspect ${mismatch.json.toFixed(3)}, but the hero image is `
+      + `${hero.imageW} × ${hero.imageH} (${mismatch.image.toFixed(3)}); moving a size control refits it to this image.`;
+  }
+  ui.showPinned(note);
+}
+
+// --- Export and import (PLAN §14.2, §14.3) -------------------------------------------------------
+
+/** The JSON text to export, after asking if it has problems; null if the user says no. */
+function exportText(): string | null {
+  const problems = exportProblems(currentReadouts(), textureProblem(state.json.animatableTextures[0].texture));
+  if (problems.length > 0 && !ui.confirmExport(problems)) return null;
+  return serializeSky3(state.json);
+}
+
+async function copyJson(): Promise<void> {
+  const text = exportText();
+  if (text === null) return;
+  try {
+    await navigator.clipboard.writeText(text); // asynchronous, like waiting on a CompletableFuture
+    ui.showExportStatus('Copied sky3_image.json to the clipboard.');
+  } catch {
+    ui.selectJson();
+    ui.showExportStatus('The browser blocked the clipboard. The JSON is selected: press Ctrl+C.', true);
+  }
+}
+
+/** Reads a sky3_image.json; on success it becomes the output exactly as loaded (decision 11.9). */
+function importJson(text: string, name: string): void {
+  const result = parseSky3(text);
+  if (!result.ok) {
+    const errors: ImportLine[] = result.errors.map((e) => ({ level: 'error', text: e }));
+    ui.showImportStatus([{ level: 'error', text: `${name} was not imported:` }, ...errors]);
+    return;
+  }
+  const { hero, json } = applyImport(state.hero, result);
+  state.hero = hero;
+  state.json = json;
+  state.pinned = true;
+  importedName = name;
+  const warnings: ImportLine[] = result.warnings.map((w) => ({ level: 'warn', text: w }));
+  ui.showImportStatus([{ level: 'ok', text: `Imported ${name}.` }, ...warnings]);
+  showJson();
 }
 
 /** Points the camera at the middle of the hero, wherever the spin has taken it. */
@@ -250,7 +384,7 @@ async function loadHero(source: Blob, name: string): Promise<void> {
   }
   scene.setHeroImage(image); // the scene owns the image from here on
   ui.showHeroStatus(`${name} · ${image.width} × ${image.height}`);
-  updateHero({ imageW: image.width, imageH: image.height });
+  updateHero({ imageW: image.width, imageH: image.height }, true);
 }
 
 // --- The bundled samples (BRIEF §8), until the user picks their own files ---------------------
@@ -267,7 +401,8 @@ function reset(): void {
   if (samples.sky) {
     setSky({ file: samples.sky, name: SAMPLE_SKY, type: 'auto', faceSize: null, leftBearingDeg: PANO_LEFT_BEARING_DEG });
   }
-  updateHero(initialHero); // sliders, mode, texture path and layer
+  updateHero(initialHero); // sliders, mode, texture path and layer; also unpins an import
+  ui.showImportStatus([]);
   if (samples.hero) void loadHero(samples.hero, SAMPLE_HERO);
 }
 

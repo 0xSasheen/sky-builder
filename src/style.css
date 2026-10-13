@@ -183,6 +183,46 @@ input[type='text'] {
 .warnings li.warn { border-left-color: var(--warn); }
 .warnings li.error { border-left-color: var(--error); color: var(--error); }
 
+.time-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.play {
+  width: 32px;
+  padding: 4px 0;
+}
+
+.time-readout { margin: 4px 0 10px; }
+
+.pinned {
+  margin: 0 0 8px;
+  padding: 4px 8px;
+  border-left: 3px solid var(--accent);
+  background: var(--bg);
+}
+
+textarea {
+  width: 100%;
+  margin-top: 6px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  font: 11px/1.45 ui-monospace, Consolas, monospace;
+  resize: vertical;
+}
+
+.field.import { margin-top: 10px; }
+
+.paste summary {
+  cursor: pointer;
+  color: var(--muted);
+}
+
 .json {
   margin: 0;
   padding: 8px;

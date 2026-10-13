@@ -114,6 +114,13 @@
 
         <section>
           <h2>Preview</h2>
+          <div class="time-row">
+            <button type="button" id="play" class="play" aria-label="Play">▶</button>
+            <input type="range" id="time" step="1" list="time-marks" aria-label="Time of day in ticks" />
+            <datalist id="time-marks"></datalist>
+            <select id="speed" aria-label="Play speed"></select>
+          </div>
+          <p class="hint time-readout" id="time-readout"></p>
           <div class="field range">
             <label for="yaw">Bearing</label>
             <input type="range" id="yaw" step="0.1" />
@@ -155,7 +162,24 @@
 
         <section>
           <h2>sky3_image.json</h2>
+          <div class="buttons">
+            <button type="button" id="copy-json">Copy</button>
+            <button type="button" id="download-json">Download sky3_image.json</button>
+            <button type="button" id="download-mcmeta">Download .mcmeta</button>
+          </div>
+          <p class="status" id="export-status" role="status"></p>
+          <p class="pinned" id="pinned-note" hidden></p>
           <pre class="json" id="json-out" tabindex="0" aria-label="Generated sky3_image.json"></pre>
+          <div class="field import">
+            <label for="import-file">Import</label>
+            <input type="file" id="import-file" accept=".json,application/json" />
+          </div>
+          <details class="paste">
+            <summary>Paste JSON</summary>
+            <textarea id="import-text" rows="6" spellcheck="false" aria-label="sky3_image.json to import"></textarea>
+            <div class="buttons"><button type="button" id="import-button">Import</button></div>
+          </details>
+          <ul class="warnings" id="import-status" aria-live="polite"></ul>
         </section>
       </aside>
     </main>

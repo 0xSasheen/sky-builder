@@ -75,6 +75,8 @@ export interface HeroParams {
 export interface ViewState {
   timeTicks: number;
   playing: boolean;
+  /** How fast Play moves the time (PLAY_SPEEDS). */
+  ticksPerSecond: number;
   /** Vertical field of view, as in Minecraft's FOV setting. */
   fovDeg: number;
   /** Compass bearing of the view, clockwise from north (east = +90), in (−180, 180]. */
