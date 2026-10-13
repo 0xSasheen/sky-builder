@@ -321,3 +321,15 @@ button:hover { border-color: var(--accent); }
 
   .panel { border-left: 0; border-top: 1px solid var(--line); }
 }
+
+/* --- Drag and drop (PLAN §15.1): while a file is dragged over the page, the rows that take one are outlined. */
+
+body.dragging [data-drop] {
+  outline: 1px dashed var(--muted);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+
+body.dragging [data-drop].drop-over {
+  outline: 2px solid var(--accent);
+}

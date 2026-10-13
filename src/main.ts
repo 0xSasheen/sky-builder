@@ -7,17 +7,19 @@ import {
   DEFAULTS, PANO_FACE_RANGE, PANO_LEFT_BEARING_DEG, PANO_LEFT_BEARING_RANGE, RANGES, TICKS_PER_DAY,
 } from './constants.ts';
 import type { ConvertReply, ConvertRequest } from './convert.worker.ts';
+import { clearImages, loadImage, saveImage } from './imagestore.ts';
 import {
-  applyImport, buildSky3, editPinned, exportProblems, HERO_MCMETA, mcmetaFileName, parseSky3, serializeSky3,
-  SKY3_FILENAME, textureProblem,
+  applyImport, buildSky3, editPinned, exportProblems, HERO_MCMETA, isJsonFile, mcmetaFileName, parseSky3,
+  serializeSky3, SKY3_FILENAME, textureProblem,
 } from './json.ts';
 import {
   advanceTicks, analyse, atlasLayout, clamp, clampHero, clampPitch, heroCentreDirection, importAspectMismatch,
   kFromHeight, mod, panoramaLayout, scaleK, skyKindFromSize, sunAngleDeg, viewToward, wrapDeg180,
 } from './math.ts';
+import { fromSaved, SAVED_KEY, toSaved, type Session } from './saved.ts';
 import { SkyScene } from './scene.ts';
 import type { AppState, HeroParams, Readouts, SkyType, ViewState } from './schema.ts';
-import { Ui, type ImportLine } from './ui.ts';
+import { Ui, type DropTarget, type ImportLine } from './ui.ts';
 import { attachDragLook } from './view.ts';
 
 const initialHero: HeroParams = {
@@ -55,7 +57,7 @@ const ui = new Ui({
   onHero: updateHero,
   onScale: (factor) => updateHero({ k: scaleK(state.hero.k, factor) }),
   onLookAtHero: lookAtHero,
-  onSkyFile: (file) => setSky({ file, name: file.name, faceSize: null }),
+  onSkyFile: pickSky,
   onSkyType: (type) => setSky({ type, faceSize: null }),
   onFaceSize: (faceSize) => setSky({ faceSize }),
   onLeftBearingPreview: previewLeftBearing,
@@ -65,7 +67,7 @@ const ui = new Ui({
     setSky({ leftBearingDeg });
   },
   onDownloadAtlas: () => { if (atlasPng) ui.download(atlasPng.blob, atlasPng.fileName); },
-  onHeroFile: (file) => loadHero(file, file.name),
+  onHeroFile: pickHero,
   onReset: reset,
   onCopy: () => void copyJson(),
   onDownloadJson: () => {
@@ -74,15 +76,12 @@ const ui = new Ui({
   },
   onDownloadMcmeta: () => ui.download(new Blob([HERO_MCMETA], { type: 'application/json' }),
     mcmetaFileName(state.json.animatableTextures[0].texture)),
-  onImportFile: (file) => {
-    file.text()
-      .then((text) => importJson(text, file.name))
-      .catch(() => ui.showImportStatus([{ level: 'error', text: `${file.name} could not be read.` }]));
-  },
+  onImportFile: importFile,
   onImportText: (text) => {
     if (text.trim() === '') ui.showImportStatus([{ level: 'error', text: 'Paste a sky3_image.json first.' }]);
     else importJson(text, 'the pasted JSON');
   },
+  onDropFiles: (files, target) => void dropFiles(files, target),
 });
 
 /** The one place the view changes: wrap and clamp, then show it everywhere. */
@@ -98,6 +97,7 @@ function updateView(patch: Partial<ViewState>): void {
   ui.showView(view);
   showTime();
   syncPlayLoop();
+  scheduleSave();
 }
 
 // --- Play (PLAN §14.1) ---------------------------------------------------------------------------
@@ -177,6 +177,7 @@ function showJson(): void {
   });
   showTime();
   ui.showExportStatus(''); // a note about the last export no longer applies to a changed JSON
+  scheduleSave();
 
   if (!state.pinned) {
     ui.showPinned(null);
@@ -210,6 +211,12 @@ async function copyJson(): Promise<void> {
     ui.selectJson();
     ui.showExportStatus('The browser blocked the clipboard. The JSON is selected: press Ctrl+C.', true);
   }
+}
+
+function importFile(file: File): void {
+  file.text()
+    .then((text) => importJson(text, file.name))
+    .catch(() => ui.showImportStatus([{ level: 'error', text: `${file.name} could not be read.` }]));
 }
 
 /** Reads a sky3_image.json; on success it becomes the output exactly as loaded (decision 11.9). */
@@ -257,8 +264,11 @@ async function decode(source: Blob, options: ImageBitmapOptions, onError: (messa
  * Preview only; never in the JSON. The left edge carries over to the next panorama, which usually
  * comes from the same tool.
  */
-const sky: { file: Blob | null; name: string; type: SkyType; faceSize: number | null; leftBearingDeg: number } =
-  { file: null, name: '', type: 'auto', faceSize: null, leftBearingDeg: PANO_LEFT_BEARING_DEG };
+const sky: {
+  file: Blob | null; name: string; type: SkyType; faceSize: number | null; leftBearingDeg: number;
+  /** True for a file the user picked: it is stored for the next visit once it has loaded (PLAN §15.2). */
+  remember: boolean;
+} = { file: null, name: '', type: 'auto', faceSize: null, leftBearingDeg: PANO_LEFT_BEARING_DEG, remember: false };
 /** Counts loads, so a slow decode that a newer load has overtaken is dropped. */
 let skyLoads = 0;
 let converter: Worker | null = null;
@@ -268,7 +278,19 @@ let shownLeftBearing: number | null = null;
 
 function setSky(patch: Partial<typeof sky>): void {
   Object.assign(sky, patch);
+  scheduleSave();
   void loadSky(); // `void` marks a promise we deliberately don't wait for
+}
+
+function pickSky(file: File): void {
+  setSky({ file, name: file.name, faceSize: null, remember: true });
+}
+
+/** Stores the sky file for the next visit, once, after it has loaded. */
+function rememberSky(): void {
+  if (!sky.remember || !sky.file) return;
+  sky.remember = false;
+  void saveImage('sky', { name: sky.name, blob: sky.file });
 }
 
 /** While the left-edge slider moves, turn the sky by the difference instead of converting (PLAN §13.7). */
@@ -312,6 +334,7 @@ async function loadSky(): Promise<void> {
     if (layout.ok) {
       scene.setAtlas(image, layout.faceSize);
       shownLeftBearing = null;
+      rememberSky();
       ui.showSkyStatus(`${name} · ${size} atlas · faces ${layout.faceSize} px`);
     } else {
       const hint = shape === 'panorama' ? ' It is 2:1, so choose Panorama or Auto.' : '';
@@ -351,6 +374,7 @@ function convertPanorama(image: ImageBitmap, faceSize: number, leftBearingDeg: n
       reply.atlas.close();
       atlasPng = { blob: reply.png, fileName: `${name.replace(/\.[^.]*$/, '')}_atlas.png` };
       ui.showAtlasDownload(true);
+      rememberSky();
       const seconds = ((performance.now() - started) / 1000).toFixed(1);
       ui.showSkyStatus(`${label} → atlas ${3 * faceSize} × ${2 * faceSize} (faces ${faceSize} px) · ${seconds} s`);
     } else {
@@ -367,13 +391,21 @@ function convertPanorama(image: ImageBitmap, faceSize: number, leftBearingDeg: n
   worker.postMessage(request, [image]);
 }
 
-/**
- * The hero keeps its alpha exactly as stored (no premultiplying), as Minecraft does, and is flipped
- * here because WebGL can't flip an ImageBitmap on upload. Its size fills in the W × H boxes.
- */
 let heroLoads = 0;
 
-async function loadHero(source: Blob, name: string): Promise<void> {
+function pickHero(file: File): void {
+  void loadHero(file, file.name, { remember: true });
+}
+
+/**
+ * The hero keeps its alpha exactly as stored (no premultiplying), as Minecraft does, and is flipped
+ * here because WebGL can't flip an ImageBitmap on upload. Its size fills in the W × H boxes, unless
+ * keepSize says the boxes already hold the right (remembered) size. `remember` stores it for next time;
+ * `standIn` marks the test card shown in place of a remembered image that is missing.
+ */
+async function loadHero(
+  source: Blob, name: string, options: { remember?: boolean; keepSize?: boolean; standIn?: boolean } = {},
+): Promise<void> {
   const load = ++heroLoads;
   const image = await decode(source, { premultiplyAlpha: 'none', imageOrientation: 'flipY' },
     (m) => ui.showHeroStatus(m, true), name);
@@ -384,7 +416,99 @@ async function loadHero(source: Blob, name: string): Promise<void> {
   }
   scene.setHeroImage(image); // the scene owns the image from here on
   ui.showHeroStatus(`${name} · ${image.width} × ${image.height}`);
-  updateHero({ imageW: image.width, imageH: image.height }, true);
+  if (options.remember) void saveImage('hero', { name, blob: source });
+  if (!options.keepSize) {
+    updateHero({ imageW: image.width, imageH: image.height }, true);
+  } else if (options.standIn && (image.width !== state.hero.imageW || image.height !== state.hero.imageH)) {
+    ui.showHeroStatus(`${name} · ${image.width} × ${image.height}, standing in at your saved size `
+      + `${state.hero.imageW} × ${state.hero.imageH}. Load your hero image again to see it.`);
+  }
+}
+
+// --- Drag and drop (PLAN §15.1) ----------------------------------------------------------------
+
+/** An image's size, or null if the file isn't an image. */
+async function imageSize(file: Blob): Promise<{ width: number; height: number } | null> {
+  try {
+    const image = await createImageBitmap(file);
+    const size = { width: image.width, height: image.height };
+    image.close();
+    return size;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Files dropped on a row go there. Files dropped anywhere else are routed by what they are: a .json to
+ * Import, a 3:2 or 2:1 image to the Sky, any other image to the Hero; the note says where each went.
+ */
+async function dropFiles(files: File[], target: DropTarget): Promise<void> {
+  const notes: string[] = [];
+  let problem = false;
+  for (const file of files) {
+    if (target === 'import' || (target === 'auto' && isJsonFile(file.name, file.type))) importFile(file);
+    else if (target === 'sky') pickSky(file);
+    else if (target === 'hero') pickHero(file);
+    else {
+      const size = await imageSize(file);
+      const shape = size && skyKindFromSize(size.width, size.height);
+      if (!size) {
+        notes.push(`${file.name} is neither an image nor a .json, so it wasn't used.`);
+        problem = true;
+      } else if (shape) {
+        pickSky(file);
+        notes.push(`${file.name} went to the Sky, as it is ${shape === 'atlas' ? '3:2' : '2:1'}. `
+          + 'Drop it on the Hero row to use it as the hero.');
+      } else {
+        pickHero(file);
+        notes.push(`${file.name} went to the Hero. Drop it on the Sky row to use it as the sky.`);
+      }
+    }
+  }
+  ui.showDropStatus(notes.join(' '), problem);
+}
+
+// --- Remembering the last session (PLAN §15.2) -------------------------------------------------
+
+let saveTimer = 0;
+
+/** Saves the settings half a second after the last change; during Play that means once it pauses. */
+function scheduleSave(): void {
+  window.clearTimeout(saveTimer);
+  saveTimer = window.setTimeout(() => {
+    try {
+      localStorage.setItem(SAVED_KEY, toSaved(currentSession()));
+    } catch {
+      // Storage blocked or full: the settings just won't be remembered.
+    }
+  }, 500);
+}
+
+function currentSession(): Session {
+  const { timeTicks, ticksPerSecond, fovDeg, yawDeg, pitchDeg, showOverlay } = state.view;
+  return {
+    hero: state.hero,
+    view: { timeTicks, ticksPerSecond, fovDeg, yawDeg, pitchDeg, showOverlay },
+    sky: { type: sky.type, faceSize: sky.faceSize, leftBearingDeg: sky.leftBearingDeg },
+    pinned: state.pinned ? { json: state.json, name: importedName } : null,
+  };
+}
+
+function readSaved(): string | null {
+  try {
+    return localStorage.getItem(SAVED_KEY);
+  } catch {
+    return null;
+  }
+}
+
+async function fetchBlob(url: string): Promise<Blob | null> {
+  try {
+    return await (await fetch(url)).blob();
+  } catch {
+    return null;
+  }
 }
 
 // --- The bundled samples (BRIEF §8), until the user picks their own files ---------------------
@@ -394,34 +518,69 @@ const SAMPLE_HERO = 'test_hero_1063x1502.png';
 /** Kept after the first fetch, for the reset button. */
 const samples: { sky: Blob | null; hero: Blob | null } = { sky: null, hero: null };
 
-/** Back to the start: the sample sky and test card, and every hero setting. The camera stays where it is. */
+/**
+ * Back to the start: the sample sky and test card, and every hero setting. The camera stays where it is.
+ * The stored images are forgotten too, and the saved settings become the defaults.
+ */
 function reset(): void {
+  void clearImages();
   ui.clearFileInputs();
   ui.showSkyType('auto');
+  ui.showDropStatus('');
   if (samples.sky) {
-    setSky({ file: samples.sky, name: SAMPLE_SKY, type: 'auto', faceSize: null, leftBearingDeg: PANO_LEFT_BEARING_DEG });
+    setSky({ file: samples.sky, name: SAMPLE_SKY, type: 'auto', faceSize: null, leftBearingDeg: PANO_LEFT_BEARING_DEG, remember: false });
   }
   updateHero(initialHero); // sliders, mode, texture path and layer; also unpins an import
   ui.showImportStatus([]);
   if (samples.hero) void loadHero(samples.hero, SAMPLE_HERO);
 }
 
+/** Restores the last session's settings at once, then its files (or the samples) as they load. */
+function restoreSettings(): Session {
+  const saved = readSaved();
+  const session = fromSaved(saved, {
+    hero: initialHero,
+    view: { ...state.view },
+    sky: { type: 'auto', faceSize: null, leftBearingDeg: PANO_LEFT_BEARING_DEG },
+    pinned: null,
+  });
+  state.hero = session.hero;
+  Object.assign(state.view, session.view);
+  if (session.pinned) {
+    state.json = session.pinned.json;
+    state.pinned = true;
+    importedName = session.pinned.name;
+  } else {
+    state.json = buildSky3(state.hero);
+  }
+  return session;
+}
+
+async function restoreFiles(session: Session, hadSaved: boolean): Promise<void> {
+  const [storedSky, storedHero, sampleSky, sampleHero] = await Promise.all([
+    loadImage('sky'), loadImage('hero'), fetchBlob(placeholderAtlasUrl), fetchBlob(testHeroUrl),
+  ]);
+  samples.sky = sampleSky;
+  samples.hero = sampleHero;
+
+  if (storedSky) {
+    ui.showSkyType(session.sky.type);
+    setSky({ ...session.sky, file: storedSky.blob, name: storedSky.name, remember: false });
+  } else if (sampleSky) {
+    setSky({ file: sampleSky, name: SAMPLE_SKY });
+  } else {
+    ui.showSkyStatus('The default atlas could not be loaded. Choose a sky file.', true);
+  }
+
+  if (storedHero) void loadHero(storedHero.blob, storedHero.name, { keepSize: true });
+  else if (sampleHero) void loadHero(sampleHero, SAMPLE_HERO, { keepSize: hadSaved, standIn: hadSaved });
+  else ui.showHeroStatus('The default test card could not be loaded. Choose a hero image.', true);
+}
+
 attachDragLook(canvas, () => state.view, updateView);
 new ResizeObserver(() => scene.resize(viewport.clientWidth, viewport.clientHeight)).observe(viewport);
+const hadSaved = readSaved() !== null;
+const session = restoreSettings();
 updateView({});
 showJson();
-
-fetch(placeholderAtlasUrl)
-  .then((response) => response.blob())
-  .then((file) => {
-    samples.sky = file;
-    setSky({ file, name: SAMPLE_SKY });
-  })
-  .catch(() => ui.showSkyStatus('The default atlas could not be loaded. Choose a sky file.', true));
-fetch(testHeroUrl)
-  .then((response) => response.blob())
-  .then((blob) => {
-    samples.hero = blob;
-    return loadHero(blob, SAMPLE_HERO);
-  })
-  .catch(() => ui.showHeroStatus('The default test card could not be loaded. Choose a hero image.', true));
+void restoreFiles(session, hadSaved);

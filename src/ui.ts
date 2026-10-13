@@ -31,7 +31,11 @@ export interface UiHandlers {
   onDownloadMcmeta(): void;
   onImportFile(file: File): void;
   onImportText(text: string): void;
+  /** Files dropped on a row, or anywhere else ('auto': routed by type and shape, PLAN §15.1). */
+  onDropFiles(files: File[], target: DropTarget): void;
 }
+
+export type DropTarget = 'sky' | 'hero' | 'import' | 'auto';
 
 /** One line of the import report (PLAN §14.3). */
 export interface ImportLine { level: 'ok' | 'warn' | 'error'; text: string }
@@ -149,6 +153,7 @@ export class Ui {
   private readonly pinnedNote = byId<HTMLParagraphElement>('pinned-note');
   private readonly importStatus = byId<HTMLUListElement>('import-status');
   private readonly importText = byId<HTMLTextAreaElement>('import-text');
+  private readonly dropStatus = byId<HTMLParagraphElement>('drop-status');
   /** Whether the last view shown was playing, so the play button knows which way to toggle. */
   private playing = false;
   private exportStatusTimer = 0;
@@ -211,6 +216,50 @@ export class Ui {
       importFile.value = ''; // so choosing the same file again imports it again
     });
     byId('import-button').addEventListener('click', () => handlers.onImportText(this.importText.value));
+
+    // --- Drag and drop (PLAN §15.1). Without preventDefault the browser would open a dropped file in place of the page.
+    const zones = [...document.querySelectorAll<HTMLElement>('[data-drop]')];
+    const hasFiles = (e: DragEvent): boolean => e.dataTransfer?.types.includes('Files') ?? false;
+    let depth = 0; // dragenter and dragleave also fire for every child element crossed, so count them
+    const endDrag = (): void => {
+      depth = 0;
+      document.body.classList.remove('dragging');
+      for (const zone of zones) zone.classList.remove('drop-over');
+    };
+    window.addEventListener('dragenter', (e) => {
+      if (!hasFiles(e)) return;
+      depth++;
+      document.body.classList.add('dragging');
+    });
+    window.addEventListener('dragleave', (e) => {
+      if (!hasFiles(e)) return;
+      depth = Math.max(0, depth - 1);
+      if (depth === 0) endDrag();
+    });
+    window.addEventListener('dragover', (e) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault(); // allows the drop
+      e.dataTransfer!.dropEffect = 'copy';
+    });
+    window.addEventListener('drop', (e) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      endDrag();
+      handlers.onDropFiles([...e.dataTransfer!.files], 'auto');
+    });
+    for (const zone of zones) {
+      zone.addEventListener('dragover', (e) => { if (hasFiles(e)) zone.classList.add('drop-over'); });
+      zone.addEventListener('dragleave', (e) => {
+        if (!zone.contains(e.relatedTarget as Node | null)) zone.classList.remove('drop-over');
+      });
+      zone.addEventListener('drop', (e) => {
+        if (!hasFiles(e)) return;
+        e.preventDefault();
+        e.stopPropagation(); // handled here, not as an 'auto' drop on the page
+        endDrag();
+        handlers.onDropFiles([...e.dataTransfer!.files], zone.dataset.drop as DropTarget);
+      });
+    }
 
     byId('reset').addEventListener('click', () => {
       if (window.confirm('Reset to the sample sky, the test card and the starting hero settings? '
@@ -353,6 +402,12 @@ export class Ui {
       li.textContent = text;
       return li;
     }));
+  }
+
+  /** Where dropped files went, or why they weren't used. */
+  showDropStatus(text: string, isError = false): void {
+    this.dropStatus.textContent = text;
+    this.dropStatus.classList.toggle('error', isError);
   }
 
   showSkyStatus(text: string, isError = false): void {

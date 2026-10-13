@@ -22,7 +22,8 @@
 
         <section>
           <h2>Files</h2>
-          <div class="field">
+          <p class="hint">Choose files, or drop them on a row or anywhere on the page.</p>
+          <div class="field" data-drop="sky">
             <label for="sky-file">Sky</label>
             <div class="sky-row">
               <select id="sky-type" aria-label="Sky file type">
@@ -53,7 +54,7 @@
           <div class="buttons" id="pano-download" hidden>
             <button type="button" id="download-atlas">Download atlas (PNG)</button>
           </div>
-          <label class="field">
+          <label class="field" data-drop="hero">
             <span>Hero image</span>
             <input type="file" id="hero-file" accept="image/png,image/*" />
           </label>
@@ -64,6 +65,8 @@
             <span>×</span>
             <input type="number" id="image-h" min="1" step="1" aria-label="Hero height in pixels" />
           </div>
+          <p class="status" id="drop-status" role="status"></p>
+          <p class="hint">Your files and settings are remembered in this browser only. Reset forgets them.</p>
         </section>
 
         <section>
@@ -170,7 +173,7 @@
           <p class="status" id="export-status" role="status"></p>
           <p class="pinned" id="pinned-note" hidden></p>
           <pre class="json" id="json-out" tabindex="0" aria-label="Generated sky3_image.json"></pre>
-          <div class="field import">
+          <div class="field import" data-drop="import">
             <label for="import-file">Import</label>
             <input type="file" id="import-file" accept=".json,application/json" />
           </div>
