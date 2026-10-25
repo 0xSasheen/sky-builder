@@ -1,6 +1,6 @@
 # Sky Builder: implementation plan
 
-Status: **All milestones (M1–M5) and the panorama input are done, merged and live at <https://0xsasheen.github.io/sky-builder/>** (2026-10-24). **Assemble pack (section 16) is built on branch `pack-assembly`**, awaiting the developer's test. What remains after that is the stretch list in BRIEF §10.
+Status: **All milestones (M1–M5), the panorama input and Assemble pack (section 16) are done, merged and live at <https://0xsasheen.github.io/sky-builder/>** (2026-10-24). Next is the planned day/night menu (section 16.6), then the stretch list in BRIEF §10.
 Decisions are in sections 11–16.
 
 Contents: 1. Source verification · 2. Architecture · 3. Types · 4. `math.ts` API and tests ·
@@ -1018,7 +1018,7 @@ screenshots. Checked on the repo: it is public, with no licence, no README, and 
 
 ---
 
-## 16. Assemble a resource pack (approved; built on branch `pack-assembly`)
+## 16. Assemble a resource pack (built, tested by the developer, live)
 
 **Request:** an **Assemble pack** button. It takes a pack template (a zip), puts in the current hero image, the
 current sky and the generated JSON, and downloads a new zip, ready to drop into `resourcepacks/`.
