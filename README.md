@@ -20,6 +20,7 @@ your computer.
 - **Plays the day**: a time slider using vanilla's sun curve, so you can watch the hero cross the sky as it will in game.
 - **Exports** `sky3_image.json` and `hero.png.mcmeta` exactly as Nuit 26.2 expects them, and **imports** an existing
   `sky3_image.json` so you can keep editing it.
+- **Assembles a resource pack** from a template, ready to drop into `resourcepacks/`.
 - **Remembers** your files and settings in your browser until you press *Reset*.
 
 ## Quick start
@@ -36,6 +37,13 @@ your computer.
 6. **Export.** Download `sky3_image.json` and the `.mcmeta` file.
 
 ![A panorama converted to an atlas, with the left-edge control](docs/screenshots/panorama.png)
+
+### Or assemble the whole pack
+
+In **Resource pack**, choose your own pack template (a `.zip`), or keep the built-in starter, then press
+**Assemble pack**. You get a new zip with your hero, its `.mcmeta`, `sky3_image.json`, and your sky as the day
+layer, or the night layer, or both. Everything else in the template is copied as it is. Drop the zip into
+`resourcepacks/`.
 
 ## Putting it in your pack
 

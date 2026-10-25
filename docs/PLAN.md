@@ -1,7 +1,7 @@
 # Sky Builder: implementation plan
 
-Status: **All milestones (M1–M5) and the panorama input are done, merged and live at <https://0xsasheen.github.io/sky-builder/>** (2026-10-24). What remains is the stretch list in BRIEF §10.
-Decisions are in sections 11–15.
+Status: **All milestones (M1–M5) and the panorama input are done, merged and live at <https://0xsasheen.github.io/sky-builder/>** (2026-10-24). **Assemble pack (section 16) is built on branch `pack-assembly`**, awaiting the developer's test. What remains after that is the stretch list in BRIEF §10.
+Decisions are in sections 11–16.
 
 Contents: 1. Source verification · 2. Architecture · 3. Types · 4. `math.ts` API and tests ·
 5. JSON output · 6. Rendering · 7. Time spin · 8. UI · 9. Milestones ·
@@ -1015,6 +1015,122 @@ screenshots. Checked on the repo: it is public, with no licence, no README, and 
   - Reset and then a reload gave the samples and the defaults.
 - **The live site** (after the Pages setting): the workflow passed (tests, build, deploy) in about a minute. All assets load
   under `/sky-builder/`, and in headless Edge the live page renders the samples and converts a dropped panorama in its worker.
+
+---
+
+## 16. Assemble a resource pack (approved; built on branch `pack-assembly`)
+
+**Request:** an **Assemble pack** button. It takes a pack template (a zip), puts in the current hero image, the
+current sky and the generated JSON, and downloads a new zip, ready to drop into `resourcepacks/`.
+
+### 16.1 The template
+
+The developer's template, `NuitSkyTestPack_26_2.zip`, has the same layout as `reference/pack-example` (read from its
+file list only; nothing was extracted):
+
+```
+pack.mcmeta
+assets/nuit/sky/sky1_night.json, sky2_day.json, sky3_image.json
+assets/sasheen/textures/sky/night.png, day.png, hero.png, hero.png.mcmeta
+```
+
+- **Your own template is an upload**, like the sky and the hero: a new **Pack template** row in Files, which also
+  takes drops. It is remembered in IndexedDB and read in the browser; nothing is uploaded. Without one, the tool uses
+  a bundled **starter template**, which has the same structure and only rule-8-safe textures (section 16.7).
+- The tool reads every `assets/nuit/sky/*.json` and sorts the layers by `type`: the `nuit:multi-textured` layer is the
+  hero layer, and each `nuit:square-textured` layer is a sky layer with its `texture` path.
+
+### 16.2 What goes into the new zip
+
+| File | Source |
+|---|---|
+| The hero layer's JSON (the template's own file name, or `assets/nuit/sky/sky3_image.json` if it has none) | The exact exported bytes (§5) |
+| `assets/<namespace>/<path>` from the JSON's `texture` | The hero image: a PNG byte for byte; any other format re-encoded to PNG from its pixels, with no colour conversion |
+| The same path plus `.mcmeta` | `HERO_MCMETA` |
+| The texture of the chosen sky layer(s) | The current sky atlas: the loaded file if it was a PNG atlas, or the converted PNG if it came from a panorama |
+| Everything else (`pack.mcmeta`, other layers and textures) | Copied unchanged |
+
+The output is named after the template, for example `NuitSkyTestPack_26_2_skybuilder.zip`.
+
+### 16.3 Checks before assembling
+
+- **Blocking:** no hero image, a texture path Minecraft can't use (`textureProblem`), or a template without
+  `pack.mcmeta` or any Nuit layers.
+- **Asked first**, like export: the hero's red errors.
+- **Listed as warnings:**
+  - a sky layer whose `rotation` differs from the hero's (`speed`, `axis`, `skyboxRotation`), so the hero would drift
+    against that sky (BRIEF §2)
+  - a sky layer with the old top-level `"blend"` object, which 26.2 ignores
+  - an atlas wider than 8192 px
+  - a template whose hero texture is left unused because the texture path changed
+
+### 16.4 Zip code
+
+- **Option A:** a small zip reader and writer using the browser's own `CompressionStream` and `DecompressionStream`
+  (`deflate-raw`) and a CRC-32: about 150 lines, no new dependency.
+- **Option B:** [fflate](https://github.com/101arrowz/fflate) (MIT, about 8 kB gzipped), a widely used zip library.
+  It handles details such as data descriptors and Unicode file names that a hand-written reader would have to get right.
+
+### 16.5 Tests
+
+- A pure module, `src/pack.ts`, plans the zip: template files in, files out, plus warnings. vitest drives it with a
+  synthetic template made in the test, with no artwork.
+- A zip round trip: assemble, unzip, and compare every file.
+- Headless Edge: assemble with the samples and a synthetic template; the JSON, hero and atlas bytes in the zip must
+  match the inputs.
+- The developer's check: drop the zip into `resourcepacks/` and press F3 + T.
+
+### 16.6 Decisions
+
+1. **The current sky replaces the day layer's texture by default.** A dropdown can change it (day, night, both, none).
+   *Later:* a menu at the top of the app will offer separate day and night skies, so a pack can get both at once.
+2. **Zip code: fflate** (option B).
+3. **Starter template: the developer's `NuitSkyTestPack_26_2.zip`**, generated earlier for this project and treated
+   as trusted. It is used when no template has been uploaded. Before it is bundled, its textures are checked against
+   rule 8 (section 16.7).
+4. **The `cube2equi.py` follow-up is dropped.** The developer uses that script on its own; its panoramas load in the
+   tool with Left edge −180.
+5. **Audit of `cube2equi.py`** (for the record): its face table matches BRIEF §3, and its panoramas equal
+   `sky_convert.py to-pano`'s shifted by 45° (north in the middle: left edge −180° instead of −135°), to within 1 per
+   channel. It holds the whole panorama in memory (about 5.6 GiB for an 8192-wide output) and doesn't check that its
+   input is 3:2.
+
+### 16.7 The bundled starter template, and rule 8
+
+The developer confirmed, and a look at the files agrees, that every texture in the template is a generated
+placeholder: `night.png` and `day.png` are labelled 3:2 guide atlases (1024 px faces, elevation and bearing lines),
+and `hero.png` is a 1063 × 1502 test card with a transparent window. So the starter is committed **as it is**, as
+loose files in `reference/samples/starter_pack/` (readable in review), including its `README.txt`. Its `pack.mcmeta`
+declares format 88 (`min_format`/`max_format`) for 26.2. Its sky layers already use `properties.blend`, not the old
+top-level object. Vite bundles the files (`import.meta.glob(…, { query: '?url' })`); the tool fetches them only when
+the starter is used. An uploaded template wins over the starter.
+
+### 16.8 As built
+
+- **`src/pack.ts`** reads templates (`readTemplate`), plans the new pack (`assemblePack`), and reads and writes zips
+  (`readZip`, `writeZip`). It works on a `Map<string, Uint8Array>` of files and uses fflate 0.8.3 for the zip
+  format. PNGs are stored as they are; text is deflated. A sky layer's role is decided by its fade: the always-on
+  layer is **night**, a fading one is **day**.
+- **`main.ts`** keeps the current sky's file (or the converted PNG) and the hero's own file, so they go in byte for
+  byte. A JPEG or WebP is re-encoded to PNG from its pixels, because Minecraft only loads PNG textures. A `.zip`
+  dropped anywhere becomes the template. The template and the "Sky goes to" choice are remembered (IndexedDB slot
+  `pack`; `Session.packSky`). Reset goes back to the starter and the day layer.
+- **UI:** a **Resource pack** section after the JSON panel, with the template picker (it also takes drops), its status,
+  **Sky goes to** (Day layer, Night layer, Both layers, Neither), **Assemble pack (.zip)**, **Use the starter
+  template** (shown while an upload is in use), and a report. The download is named `<template>_skybuilder.zip`.
+- **Tests:** `tests/pack.test.ts` covers reading a template, every sky choice, a changed texture path, refusals, the
+  zip round trip, and the real bundled starter (no warnings, format 88). `tests/saved.test.ts` covers `packSky`.
+- **Checked in headless Edge:**
+  - From the starter: the zip's file list equals the starter's. `sky3_image.json` equals the exported bytes, `hero.png`
+    equals the loaded test card, and `day.png` equals the loaded atlas, all byte for byte. Everything else is unchanged.
+  - Your template dropped on the page, a converted panorama, and **Both layers**: `night.png` and `day.png` are the
+    same 1536 × 1024 converted PNG.
+  - Texture `mine:textures/sky/girl.png`: the hero and its `.mcmeta` land there, with a warning that the old
+    `hero.png` is unused.
+  - A bad texture path is refused, and a red error is asked about first.
+  - Every zip passes Python's CRC check.
+  - After a reload, the uploaded template and "Both layers" come back.
+- **Later** (decision 1): a menu at the top of the app for separate day and night skies.
 
 ---
 

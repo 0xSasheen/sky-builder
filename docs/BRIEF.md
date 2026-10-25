@@ -363,6 +363,9 @@ to each constraint limit, and warnings when a §6.1 constraint is broken.
 ### Outputs
 - A live JSON panel, with Copy and Download (`sky3_image.json`).
 - Download for `hero.png.mcmeta`.
+- **Assemble pack** (PLAN §16): a resource pack zip built from a template (uploaded, or the bundled starter),
+  with the current hero, its `.mcmeta`, this JSON, and the current sky as the day layer (or night, both or
+  neither).
 - Import: paste or load an existing `sky3_image.json` and recover the slider
   values (§6.3).
 
@@ -413,6 +416,9 @@ to each constraint limit, and warnings when a §6.1 constraint is broken.
   does atlas → panorama. Panorama → atlas *is* in scope since 2026-10-12 (§8).
 - Editing the sky atlases themselves.
 - Any server or backend. The tool is a static site.
+
+**Planned:** a menu at the top of the app for separate day and night skies, so an assembled pack can get
+both at once (PLAN §16.6).
 
 **Maybe later (back burner):** a heading control for sky *atlases*, like the
 panorama's left edge. It needs atlas → panorama → atlas resampling.
@@ -478,6 +484,7 @@ Raise these in the plan. Don't guess silently. Status as of 2026-10-11:
 | `test-vectors.json` | §7 as data, for the tests |
 | `samples/placeholder_atlas.png` | Labelled 3 × 2 atlas (512 px faces) with UP markers, horizon lines, and the neighbouring compass letters on each edge. Use it to check orientation |
 | `samples/test_hero_1063x1502.png` | Grid test card at the hero's real size, marked TOP, BOTTOM, L and R |
+| `samples/starter_pack/` | The starter resource pack for Assemble pack: `pack.mcmeta`, the three layer files, and generated placeholder textures (PLAN §16.7) |
 | `samples/placeholder_pano_2048x1024.png` | The placeholder atlas as a panorama (`sky_convert.py to-pano`), for trying the panorama input |
 | `samples/pano_test_256x128.png`, `pano_test_atlas_f64.png`, `pano_test_atlas_f37.png` | A synthetic panorama and `sky_convert.py to-atlas` output from it at faces 64 and 37: test fixtures for the browser port (PLAN §13.5) |
 | `pack-example/assets/nuit/sky/*.json` | The three working layer files. Note: `sky1`/`sky2` still have the old top-level `"blend"` object, which 26.2 ignores |
