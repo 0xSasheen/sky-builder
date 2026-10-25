@@ -89,6 +89,9 @@ export interface ViewState {
 /** The atlas cell grid, or why the image can't be one (BRIEF §8). */
 export type AtlasLayout = { ok: true; faceSize: number } | { ok: false; message: string };
 
+/** Which sky layer(s) of a pack template the current sky replaces (PLAN §16). Day by default. */
+export type SkyTarget = 'day' | 'night' | 'both' | 'none';
+
 /** What a sky file is. 'auto' (the upload default) decides from the shape: 3:2 is an atlas, 2:1 a panorama. */
 export type SkyKind = 'atlas' | 'panorama';
 export type SkyType = 'auto' | SkyKind;
