@@ -1,9 +1,7 @@
 # Sky Builder: implementation plan
 
-Status: **M1–M3 and the panorama input (section 13) are merged to `main`; in-game check A confirmed the mapping-Y
-sign. M4 (section 14) is done and merged.** M5 (section 15) is done on branch `m5-polish`, awaiting the developer's test. After the merge, GitHub Pages
-needs its one-time setting (section 15.3). Decisions are in
-sections 11–14.
+Status: **All milestones (M1–M5) and the panorama input are done, merged and live at <https://0xsasheen.github.io/sky-builder/>** (2026-10-24). What remains is the stretch list in BRIEF §10.
+Decisions are in sections 11–15.
 
 Contents: 1. Source verification · 2. Architecture · 3. Types · 4. `math.ts` API and tests ·
 5. JSON output · 6. Rendering · 7. Time spin · 8. UI · 9. Milestones ·
@@ -1015,7 +1013,8 @@ screenshots. Checked on the repo: it is public, with no licence, no README, and 
     overlay all came back.
   - After unpinning and reloading, it stayed unpinned with ψ = 20.
   - Reset and then a reload gave the samples and the defaults.
-- **Not yet checked:** the live site, which needs the Pages setting first.
+- **The live site** (after the Pages setting): the workflow passed (tests, build, deploy) in about a minute. All assets load
+  under `/sky-builder/`, and in headless Edge the live page renders the samples and converts a dropped panorama in its worker.
 
 ---
 
