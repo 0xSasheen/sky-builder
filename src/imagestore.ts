@@ -6,7 +6,8 @@
 const DB_NAME = 'sky-builder';
 const STORE = 'images';
 
-export type ImageSlot = 'sky' | 'hero';
+/** The last sky file, hero image and pack template (PLAN §16) the user picked. */
+export type ImageSlot = 'sky' | 'hero' | 'pack';
 
 export interface StoredImage {
   name: string;
@@ -57,6 +58,14 @@ export async function loadImage(slot: ImageSlot): Promise<StoredImage | null> {
     // Fall through: nothing to restore.
   }
   return null;
+}
+
+export async function forgetImage(slot: ImageSlot): Promise<void> {
+  try {
+    await withStore('readwrite', (store) => store.delete(slot));
+  } catch {
+    // Nothing stored, or storage blocked.
+  }
 }
 
 export async function clearImages(): Promise<void> {

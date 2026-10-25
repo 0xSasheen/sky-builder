@@ -144,6 +144,9 @@ h2 {
   font-size: 12px;
 }
 
+/* A section's introductory line gets a little room before the first control. */
+section > p.hint { margin-bottom: 6px; }
+
 input[type='text'] {
   width: 100%;
   padding: 3px 6px;
@@ -217,6 +220,12 @@ textarea {
 }
 
 .field.import { margin-top: 10px; }
+
+.field.pick {
+  grid-template-columns: 72px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+}
 
 .paste summary {
   cursor: pointer;

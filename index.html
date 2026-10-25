@@ -184,6 +184,33 @@
           </details>
           <ul class="warnings" id="import-status" aria-live="polite"></ul>
         </section>
+
+        <section>
+          <h2>Resource pack</h2>
+          <p class="hint">
+            Builds a pack from a template: the current sky, the hero, its .mcmeta and this JSON go in, and the rest of
+            the template is copied as it is.
+          </p>
+          <div class="field" data-drop="pack">
+            <label for="pack-file">Template (.zip)</label>
+            <input type="file" id="pack-file" accept=".zip,application/zip" />
+          </div>
+          <p class="status" id="pack-status" role="status"></p>
+          <div class="field pick">
+            <label for="pack-sky">Sky goes to</label>
+            <select id="pack-sky">
+              <option value="day">Day layer</option>
+              <option value="night">Night layer</option>
+              <option value="both">Both layers</option>
+              <option value="none">Neither (keep the template's)</option>
+            </select>
+          </div>
+          <div class="buttons">
+            <button type="button" id="assemble">Assemble pack (.zip)</button>
+            <button type="button" id="pack-starter" hidden>Use the starter template</button>
+          </div>
+          <ul class="warnings" id="pack-report" aria-live="polite"></ul>
+        </section>
       </aside>
     </main>
     <script type="module" src="/src/main.ts"></script>

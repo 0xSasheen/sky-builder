@@ -5,7 +5,7 @@ import {
   FACE_WARN_LIMIT, K_RANGE, PANO_FACE_RANGE, PANO_LEFT_BEARING_RANGE, PLAY_SPEEDS, RANGES, TIME_MARKS,
 } from './constants.ts';
 import { heightFromK, kFromHeight, mcFacing, mcYawPitch, noonBearingDeg, quadrantBearing, ticksToClock } from './math.ts';
-import type { HeroMode, HeroParams, Readouts, Sky3Json, SkyType, ViewState } from './schema.ts';
+import type { HeroMode, HeroParams, Readouts, Sky3Json, SkyTarget, SkyType, ViewState } from './schema.ts';
 
 export interface UiHandlers {
   onView(patch: Partial<ViewState>): void;
@@ -33,9 +33,15 @@ export interface UiHandlers {
   onImportText(text: string): void;
   /** Files dropped on a row, or anywhere else ('auto': routed by type and shape, PLAN §15.1). */
   onDropFiles(files: File[], target: DropTarget): void;
+  /** A pack template (.zip) chosen in the Resource pack section (PLAN §16). */
+  onPackFile(file: File): void;
+  onPackSky(target: SkyTarget): void;
+  onAssemble(): void;
+  /** Back to the bundled starter template. */
+  onUseStarter(): void;
 }
 
-export type DropTarget = 'sky' | 'hero' | 'import' | 'auto';
+export type DropTarget = 'sky' | 'hero' | 'import' | 'pack' | 'auto';
 
 /** One line of the import report (PLAN §14.3). */
 export interface ImportLine { level: 'ok' | 'warn' | 'error'; text: string }
@@ -134,7 +140,11 @@ export class Ui {
   private readonly faceSize = byId<HTMLInputElement>('face-size');
   private readonly leftBearing = byId<HTMLInputElement>('left-bearing');
   private readonly leftBearingNum = byId<HTMLInputElement>('left-bearing-num');
-  private readonly fileInputs = ['sky-file', 'hero-file', 'import-file'].map((id) => byId<HTMLInputElement>(id));
+  private readonly fileInputs = ['sky-file', 'hero-file', 'import-file', 'pack-file'].map((id) => byId<HTMLInputElement>(id));
+  private readonly packSky = byId<HTMLSelectElement>('pack-sky');
+  private readonly packStatus = byId<HTMLParagraphElement>('pack-status');
+  private readonly packStarter = byId<HTMLButtonElement>('pack-starter');
+  private readonly packReport = byId<HTMLUListElement>('pack-report');
   private readonly panoDownload = byId<HTMLDivElement>('pano-download');
   private readonly heroStatus = byId<HTMLParagraphElement>('hero-status');
   private readonly modes = [...document.querySelectorAll<HTMLInputElement>('input[name="mode"]')];
@@ -216,6 +226,16 @@ export class Ui {
       importFile.value = ''; // so choosing the same file again imports it again
     });
     byId('import-button').addEventListener('click', () => handlers.onImportText(this.importText.value));
+
+    // --- Resource pack (PLAN §16)
+    const packFile = byId<HTMLInputElement>('pack-file');
+    packFile.addEventListener('change', () => {
+      const file = packFile.files?.[0];
+      if (file) handlers.onPackFile(file);
+    });
+    this.packSky.addEventListener('change', () => handlers.onPackSky(this.packSky.value as SkyTarget));
+    byId('assemble').addEventListener('click', () => handlers.onAssemble());
+    this.packStarter.addEventListener('click', () => handlers.onUseStarter());
 
     // --- Drag and drop (PLAN §15.1). Without preventDefault the browser would open a dropped file in place of the page.
     const zones = [...document.querySelectorAll<HTMLElement>('[data-drop]')];
@@ -397,6 +417,27 @@ export class Ui {
 
   showImportStatus(lines: readonly ImportLine[]): void {
     this.importStatus.replaceChildren(...lines.map(({ level, text }) => {
+      const li = document.createElement('li');
+      li.className = level;
+      li.textContent = text;
+      return li;
+    }));
+  }
+
+  /** Which template Assemble pack will use; `uploaded` offers the way back to the starter. */
+  showPackStatus(text: string, isError = false, uploaded = false): void {
+    this.packStatus.textContent = text;
+    this.packStatus.classList.toggle('error', isError);
+    this.packStarter.hidden = !uploaded;
+  }
+
+  showPackSky(target: SkyTarget): void {
+    this.packSky.value = target;
+  }
+
+  /** The outcome of the last Assemble pack: what went in, and anything worth knowing. */
+  showPackReport(lines: readonly ImportLine[]): void {
+    this.packReport.replaceChildren(...lines.map(({ level, text }) => {
       const li = document.createElement('li');
       li.className = level;
       li.textContent = text;

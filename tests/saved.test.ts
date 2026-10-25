@@ -12,6 +12,7 @@ const defaults: Session = {
   view: { timeTicks: 6000, ticksPerSecond: DEFAULTS.ticksPerSecond, fovDeg: 70, yawDeg: 0, pitchDeg: 0, showOverlay: false },
   sky: { type: 'auto', faceSize: null, leftBearingDeg: -135 },
   pinned: null,
+  packSky: 'day',
 };
 
 const changed: Session = {
@@ -19,6 +20,7 @@ const changed: Session = {
   view: { timeTicks: 18000, ticksPerSecond: PLAY_SPEEDS[0].ticksPerSecond, fovDeg: 90, yawDeg: -45, pitchDeg: 22.47, showOverlay: true },
   sky: { type: 'panorama', faceSize: 1024, leftBearingDeg: -180 },
   pinned: null,
+  packSky: 'both',
 };
 
 /** Edits a saved entry as an object and writes it back. */
@@ -54,6 +56,7 @@ describe('saved session (PLAN §15.2)', () => {
       o.hero.k = 'big';
       o.view.ticksPerSecond = 123;
       o.sky.type = 'cube';
+      o.packSky = 'sideways';
     }), defaults);
     expect(restored.hero.mode).toBe(defaults.hero.mode);
     expect(restored.hero.k).toBe(defaults.hero.k);
@@ -62,6 +65,11 @@ describe('saved session (PLAN §15.2)', () => {
     expect(restored.view.timeTicks).toBe(18000);
     expect(restored.sky.type).toBe('auto');
     expect(restored.sky.faceSize).toBe(1024);
+    expect(restored.packSky).toBe('day');
+  });
+
+  it('an entry saved before packSky existed gets the default', () => {
+    expect(fromSaved(tamper(changed, (o) => { delete o.packSky; }), defaults).packSky).toBe('day');
   });
 
   it('values are clamped as if typed in', () => {

@@ -7,7 +7,7 @@ import {
   DEFAULTS, PANO_FACE_RANGE, PANO_LEFT_BEARING_DEG, PANO_LEFT_BEARING_RANGE, RANGES, TICKS_PER_DAY,
 } from './constants.ts';
 import type { ConvertReply, ConvertRequest } from './convert.worker.ts';
-import { clearImages, loadImage, saveImage } from './imagestore.ts';
+import { clearImages, forgetImage, loadImage, saveImage } from './imagestore.ts';
 import {
   applyImport, buildSky3, editPinned, exportProblems, HERO_MCMETA, isJsonFile, mcmetaFileName, parseSky3,
   serializeSky3, SKY3_FILENAME, textureProblem,
@@ -16,9 +16,10 @@ import {
   advanceTicks, analyse, atlasLayout, clamp, clampHero, clampPitch, heroCentreDirection, importAspectMismatch,
   kFromHeight, mod, panoramaLayout, scaleK, skyKindFromSize, sunAngleDeg, viewToward, wrapDeg180,
 } from './math.ts';
+import { assemblePack, isPng, isZipFile, readTemplate, readZip, writeZip, type PackFiles } from './pack.ts';
 import { fromSaved, SAVED_KEY, toSaved, type Session } from './saved.ts';
 import { SkyScene } from './scene.ts';
-import type { AppState, HeroParams, Readouts, SkyType, ViewState } from './schema.ts';
+import type { AppState, HeroParams, Readouts, SkyTarget, SkyType, ViewState } from './schema.ts';
 import { Ui, type DropTarget, type ImportLine } from './ui.ts';
 import { attachDragLook } from './view.ts';
 
@@ -82,6 +83,18 @@ const ui = new Ui({
     else importJson(text, 'the pasted JSON');
   },
   onDropFiles: (files, target) => void dropFiles(files, target),
+  onPackFile: (file) => void loadPackTemplate(file, file.name, true),
+  onPackSky: (target) => {
+    packSky = target;
+    scheduleSave();
+  },
+  onAssemble: () => void assemble(),
+  onUseStarter: () => {
+    packTemplate = null;
+    void forgetImage('pack');
+    ui.clearFileInputs();
+    showStarterStatus();
+  },
 });
 
 /** The one place the view changes: wrap and clamp, then show it everywhere. */
@@ -334,6 +347,7 @@ async function loadSky(): Promise<void> {
     if (layout.ok) {
       scene.setAtlas(image, layout.faceSize);
       shownLeftBearing = null;
+      skyForPack = { blob: file, width: image.width };
       rememberSky();
       ui.showSkyStatus(`${name} · ${size} atlas · faces ${layout.faceSize} px`);
     } else {
@@ -374,6 +388,7 @@ function convertPanorama(image: ImageBitmap, faceSize: number, leftBearingDeg: n
       reply.atlas.close();
       atlasPng = { blob: reply.png, fileName: `${name.replace(/\.[^.]*$/, '')}_atlas.png` };
       ui.showAtlasDownload(true);
+      skyForPack = { blob: reply.png, width: 3 * faceSize };
       rememberSky();
       const seconds = ((performance.now() - started) / 1000).toFixed(1);
       ui.showSkyStatus(`${label} → atlas ${3 * faceSize} × ${2 * faceSize} (faces ${faceSize} px) · ${seconds} s`);
@@ -416,6 +431,7 @@ async function loadHero(
   }
   scene.setHeroImage(image); // the scene owns the image from here on
   ui.showHeroStatus(`${name} · ${image.width} × ${image.height}`);
+  heroForPack = source;
   if (options.remember) void saveImage('hero', { name, blob: source });
   if (!options.keepSize) {
     updateHero({ imageW: image.width, imageH: image.height }, true);
@@ -448,6 +464,10 @@ async function dropFiles(files: File[], target: DropTarget): Promise<void> {
   let problem = false;
   for (const file of files) {
     if (target === 'import' || (target === 'auto' && isJsonFile(file.name, file.type))) importFile(file);
+    else if (target === 'pack' || (target === 'auto' && isZipFile(file.name, file.type))) {
+      void loadPackTemplate(file, file.name, true);
+      if (target === 'auto') notes.push(`${file.name} is the pack template now.`);
+    }
     else if (target === 'sky') pickSky(file);
     else if (target === 'hero') pickHero(file);
     else {
@@ -492,6 +512,7 @@ function currentSession(): Session {
     view: { timeTicks, ticksPerSecond, fovDeg, yawDeg, pitchDeg, showOverlay },
     sky: { type: sky.type, faceSize: sky.faceSize, leftBearingDeg: sky.leftBearingDeg },
     pinned: state.pinned ? { json: state.json, name: importedName } : null,
+    packSky,
   };
 }
 
@@ -509,6 +530,110 @@ async function fetchBlob(url: string): Promise<Blob | null> {
   } catch {
     return null;
   }
+}
+
+// --- Resource pack (PLAN §16) ----------------------------------------------------------------------
+
+/** The uploaded template, if any; without one, the bundled starter is used. */
+let packTemplate: { name: string; files: PackFiles } | null = null;
+let packSky: SkyTarget = 'day';
+/** What Assemble pack puts in: the current sky as loaded (or as converted) and the hero's own file. */
+let skyForPack: { blob: Blob; width: number } | null = null;
+let heroForPack: Blob | null = null;
+
+/** The starter template's files, bundled by Vite: path in the repo → URL on the site. Fetched only when used. */
+const STARTER_NAME = 'NuitSkyTestPack_26_2.zip';
+const STARTER_PREFIX = '../reference/samples/starter_pack/';
+const starterUrls = import.meta.glob('../reference/samples/starter_pack/**/*',
+  { query: '?url', import: 'default', eager: true }) as Record<string, string>;
+
+async function starterFiles(): Promise<PackFiles> {
+  const entries = await Promise.all(Object.entries(starterUrls).map(async ([path, url]) =>
+    [path.slice(STARTER_PREFIX.length), new Uint8Array(await (await fetch(url)).arrayBuffer())] as const));
+  return new Map(entries);
+}
+
+function showStarterStatus(): void {
+  ui.showPackStatus(`Template: the starter (${STARTER_NAME}), with placeholder skies and a test hero. `
+    + 'Choose or drop your own template to use it instead.');
+}
+
+/** Reads a template zip. A bad one is reported, and the template in use stays. */
+async function loadPackTemplate(source: Blob, name: string, remember: boolean): Promise<void> {
+  const keep = packTemplate ? `${packTemplate.name} is still used.` : 'The starter template is still used.';
+  let files: PackFiles;
+  try {
+    files = readZip(new Uint8Array(await source.arrayBuffer()));
+  } catch {
+    ui.showPackStatus(`${name} could not be read as a zip. ${keep}`, true, packTemplate !== null);
+    return;
+  }
+  const info = readTemplate(files);
+  if (info.problems.length > 0) {
+    ui.showPackStatus(`${name}: ${info.problems.join(' ')} ${keep}`, true, packTemplate !== null);
+    return;
+  }
+  packTemplate = { name, files };
+  if (remember) void saveImage('pack', { name, blob: source });
+  const skies = info.skyLayers.map((l) => l.role).join(' and ') || 'no';
+  ui.showPackStatus(`Template: ${name} · ${files.size} files · ${skies} sky layers and a hero layer.`, false, true);
+  ui.showPackReport(info.warnings.map((text) => ({ level: 'warn', text })));
+}
+
+/** An image file as PNG bytes: as it is if it is a PNG already, otherwise re-encoded from its pixels. */
+async function pngBytes(blob: Blob): Promise<Uint8Array | null> {
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  if (isPng(bytes)) return bytes;
+  try {
+    const image = await createImageBitmap(blob, { colorSpaceConversion: 'none', premultiplyAlpha: 'none' });
+    const canvas = new OffscreenCanvas(image.width, image.height);
+    canvas.getContext('2d')!.drawImage(image, 0, 0);
+    image.close();
+    return new Uint8Array(await (await canvas.convertToBlob({ type: 'image/png' })).arrayBuffer());
+  } catch {
+    return null;
+  }
+}
+
+/** Builds the pack and downloads it (PLAN §16.2). Red errors are asked about first, as for export. */
+async function assemble(): Promise<void> {
+  const errors = currentReadouts().warnings.filter((w) => w.level === 'error').map((w) => w.message);
+  if (errors.length > 0 && !ui.confirmExport(errors)) return;
+  if (!heroForPack) {
+    ui.showPackReport([{ level: 'error', text: 'Load a hero image first.' }]);
+    return;
+  }
+  ui.showPackReport([{ level: 'ok', text: 'Assembling…' }]);
+  const [template, heroPng, skyPng] = await Promise.all([
+    packTemplate ? Promise.resolve(packTemplate.files) : starterFiles(),
+    pngBytes(heroForPack),
+    skyForPack ? pngBytes(skyForPack.blob) : Promise.resolve(null),
+  ]);
+  if (!heroPng) {
+    ui.showPackReport([{ level: 'error', text: 'The hero image could not be read.' }]);
+    return;
+  }
+  const result = assemblePack(template, {
+    jsonText: serializeSky3(state.json),
+    texture: state.json.animatableTextures[0].texture,
+    heroPng,
+    skyPng,
+    skyWidth: skyForPack?.width ?? 0,
+    skyTarget: packSky,
+  });
+  if (!result.ok) {
+    ui.showPackReport(result.problems.map((text) => ({ level: 'error', text })));
+    return;
+  }
+  const fileName = `${(packTemplate?.name ?? STARTER_NAME).replace(/\.zip$/i, '')}_skybuilder.zip`;
+  // fflate always returns a plain ArrayBuffer-backed array; the cast tells TypeScript so for Blob.
+  const zip = writeZip(result.files) as Uint8Array<ArrayBuffer>;
+  ui.download(new Blob([zip], { type: 'application/zip' }), fileName);
+  const size = (zip.length / 2 ** 20).toFixed(1);
+  ui.showPackReport([
+    { level: 'ok', text: `Saved ${fileName} (${result.files.size} files, ${size} MB). Put it in resourcepacks/, then press F3 + T in game.` },
+    ...result.warnings.map((text): ImportLine => ({ level: 'warn', text })),
+  ]);
 }
 
 // --- The bundled samples (BRIEF §8), until the user picks their own files ---------------------
@@ -532,6 +657,11 @@ function reset(): void {
   }
   updateHero(initialHero); // sliders, mode, texture path and layer; also unpins an import
   ui.showImportStatus([]);
+  packTemplate = null;
+  packSky = 'day';
+  ui.showPackSky(packSky);
+  ui.showPackReport([]);
+  showStarterStatus();
   if (samples.hero) void loadHero(samples.hero, SAMPLE_HERO);
 }
 
@@ -543,7 +673,10 @@ function restoreSettings(): Session {
     view: { ...state.view },
     sky: { type: 'auto', faceSize: null, leftBearingDeg: PANO_LEFT_BEARING_DEG },
     pinned: null,
+    packSky: 'day',
   });
+  packSky = session.packSky;
+  ui.showPackSky(packSky);
   state.hero = session.hero;
   Object.assign(state.view, session.view);
   if (session.pinned) {
@@ -557,9 +690,11 @@ function restoreSettings(): Session {
 }
 
 async function restoreFiles(session: Session, hadSaved: boolean): Promise<void> {
-  const [storedSky, storedHero, sampleSky, sampleHero] = await Promise.all([
-    loadImage('sky'), loadImage('hero'), fetchBlob(placeholderAtlasUrl), fetchBlob(testHeroUrl),
+  const [storedSky, storedHero, storedPack, sampleSky, sampleHero] = await Promise.all([
+    loadImage('sky'), loadImage('hero'), loadImage('pack'), fetchBlob(placeholderAtlasUrl), fetchBlob(testHeroUrl),
   ]);
+  if (storedPack) void loadPackTemplate(storedPack.blob, storedPack.name, false);
+  else showStarterStatus();
   samples.sky = sampleSky;
   samples.hero = sampleHero;
 
