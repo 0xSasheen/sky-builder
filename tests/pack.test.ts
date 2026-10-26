@@ -55,6 +55,18 @@ describe('reading a template (PLAN §16.1)', () => {
     expect(info.problems).toEqual([]);
   });
 
+  it('tells night from day by empty keyFrames, not by "alwaysOn", which 26.2 ignores (PLAN §17.1)', () => {
+    const t = template();
+    t.set('assets/nuit/sky/sky1_night.json', enc(sky1Text.replace('"alwaysOn": true,', '')));
+    t.set('assets/nuit/sky/sky2_day.json', enc(sky2Text.replace('"alwaysOn": false,', '')));
+    expect(sky1Text).toContain('"alwaysOn": true,'); // the replacements above did something
+    expect(readTemplate(t).skyLayers.map((l) => l.role)).toEqual(['night', 'day']);
+
+    // A misleading alwaysOn changes nothing either: Nuit never reads it.
+    t.set('assets/nuit/sky/sky2_day.json', enc(sky2Text.replace('"alwaysOn": false', '"alwaysOn": true')));
+    expect(readTemplate(t).skyLayers.map((l) => l.role)).toEqual(['night', 'day']);
+  });
+
   it('notes the old top-level "blend" in both sky layers, and that their rotation matches the hero', () => {
     const warnings = readTemplate(template()).warnings;
     expect(warnings.filter((w) => w.includes('top-level "blend"'))).toHaveLength(2);

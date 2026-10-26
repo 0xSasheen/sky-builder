@@ -14,7 +14,7 @@ export interface SkyLayer {
   file: string;
   /** Where its texture lives in the zip, e.g. assets/sasheen/textures/sky/day.png; null if it names none. */
   texturePath: string | null;
-  /** The always-on layer is the night sky; one that fades is the day sky. */
+  /** The always-on layer (empty keyFrames) is the night sky; one that fades is the day sky. */
   role: 'night' | 'day';
 }
 
@@ -80,8 +80,11 @@ export function readTemplate(files: PackFiles): TemplateInfo {
       heroLayers.push({ file, texturePath: texturePath(texture) });
     } else if (layer.type === 'nuit:square-textured') {
       const texture = typeof layer.texture === 'string' ? layer.texture : '';
+      // Nuit 26.2's Fade has no "alwaysOn" field (it is dropped when read): a layer is always on exactly
+      // when its keyFrames are empty (AbstractSkybox.updateAlpha, PLAN §17.1).
       const fade = isObj(props.fade) ? props.fade : {};
-      skyLayers.push({ file, texturePath: texturePath(texture), role: fade.alwaysOn === true ? 'night' : 'day' });
+      const alwaysOn = !isObj(fade.keyFrames) || Object.keys(fade.keyFrames).length === 0;
+      skyLayers.push({ file, texturePath: texturePath(texture), role: alwaysOn ? 'night' : 'day' });
       if (!rotationMatches(props.rotation)) {
         warnings.push(`${file} turns differently from the hero layer (speed, axis or skyboxRotation), so the hero `
           + 'would drift against this sky.');
