@@ -1,7 +1,8 @@
 # Sky Builder: implementation plan
 
-Status: **All milestones (M1–M5), the panorama input and Assemble pack (section 16) are done, merged and live at <https://0xsasheen.github.io/sky-builder/>** (2026-10-24). Next is the planned day/night menu (section 16.6), then the stretch list in BRIEF §10.
-Decisions are in sections 11–16.
+Status: **All milestones (M1–M5), the panorama input and Assemble pack (section 16) are done, merged and live at <https://0xsasheen.github.io/sky-builder/>** (2026-10-24).
+**Next: sky tabs with day/night blending (section 17), planned 2026-10-25 and waiting for approval.**
+Decisions are in sections 11–17.
 
 Contents: 1. Source verification · 2. Architecture · 3. Types · 4. `math.ts` API and tests ·
 5. JSON output · 6. Rendering · 7. Time spin · 8. UI · 9. Milestones ·
@@ -1130,11 +1131,293 @@ the starter is used. An uploaded template wins over the starter.
   - A bad texture path is refused, and a red error is asked about first.
   - Every zip passes Python's CRC check.
   - After a reload, the uploaded template and "Both layers" come back.
-- **Later** (decision 1): a menu at the top of the app for separate day and night skies.
+- **Later** (decision 1): a menu at the top of the app for separate day and night skies. *Now planned as section 17.*
 
 ---
 
-*Sources checked:* the Nuit 26.2/dev files listed above; vanilla 26.2 `data/minecraft/timeline/day.json` via
+## 17. Sky tabs, with day/night blending (planned 2026-10-25, waiting for approval)
+
+**Request:** separate day and night skies, blended by time of day as Nuit blends them, with editable fade keyframes.
+They are organised as **tabs** (Day, Night, and later any number more, such as Sunrise or Sunset), and each tab has an
+**Include** checkbox that decides which skies go into the assembled pack. This replaces the "Sky goes to" dropdown
+(section 16.6, decision 1) and does the BRIEF §9 crossfade stretch goal in a general form. It also fixes a bug in
+`pack.ts` (17.1).
+
+### 17.1 Checked in the Nuit source (26.2/dev)
+
+I read `components/Fade.java`, `skybox/AbstractSkybox.java` and `SkyboxManager.java`, in addition to the files in
+section 1.
+
+- **`Fade` has only `duration` (default 24000, at least 1) and `keyFrames`** (tick → alpha, each clamped to [0, 1]).
+  The constructor **throws** if a keyframe is outside $[0, \text{duration})$, which makes the whole layer file fail to
+  load. **There is no `alwaysOn` field.** The codec drops it silently, as it drops the old top-level `blend`.
+- **Bug:** `pack.readTemplate` decides a sky layer's role from `fade.alwaysOn === true` ([pack.ts:84](../src/pack.ts#L84)).
+  It works today only because the starter and the developer's pack still carry the ignored field. A clean 26.2
+  template's night layer would be taken for a day layer. **Fix:** a layer is always on exactly when its `keyFrames`
+  is empty, because that is what Nuit does (next point).
+- **Alpha** (`AbstractSkybox.updateAlpha`, once per game tick): `alpha = fadeAlpha · conditionAlpha`.
+  - Empty `keyFrames` gives `fadeAlpha = 1`: always on.
+  - Otherwise `Utils.findClosestKeyframes` finds the keyframes on either side of the time, wrapping around the day,
+    and `Utils.calculateInterpolatedAlpha` interpolates **linearly** between them (17.2). The time is
+    `clock.getCycleTicks`, a whole number of ticks.
+  - `conditionAlpha` eases between 0 and 1 over `transitionIn/OutDuration` ticks as the layer's conditions (weather,
+    biome, effects and so on) start or stop holding. In the target environment (BRIEF §1) it sits at 1, so the
+    preview takes it as 1.
+- **Order and drawing** (`SkyboxManager.tick`, `renderSkyboxes`): layers with alpha 0 are dropped, and the rest are
+  sorted by `layer` (lowest first) and drawn in that order. Nuit cancels the vanilla sky while it draws. A textured
+  layer draws its texture times `ColorModulator = (1, 1, 1, alpha)` with the "normal" blend
+  `SRC_ALPHA, ONE_MINUS_SRC_ALPHA` (section 12).
+
+### 17.2 The math
+
+**Fade alpha** (`math.fadeAlpha`), a port of Nuit's two functions. The keyframes are $(k_j, a_j)$ with
+$0 \le k_j < 24000$, and $T$ is the time in whole ticks ($T = \lfloor T_{\text{preview}} \rfloor$, as in Nuit):
+
+1. No keyframes: $\alpha = 1$.
+2. Find the keyframe at or before $T$, $k_c = \max\{k_j \le T\}$, and the first one after it,
+   $k_n = \min\{k_j > T\}$.
+3. If either doesn't exist ($T$ is before the first or after the last keyframe), wrap around the day:
+   $k_c = \max_j k_j$ and $k_n = \min_j k_j$.
+4. If $a_c = a_n$ or $k_c = k_n$ (a single keyframe), then $\alpha = a_n$.
+5. Otherwise, the length of the span and how far into it $T$ is:
+   - no wrap ($k_c < k_n$): $D = k_n - k_c$ and $\tau = T - k_c$;
+   - wrap ($k_c > k_n$): $D = 24000 - k_c + k_n$, and $\tau = 24000 - k_c + T$ if $T < k_n$, else $\tau = T - k_c$.
+6. $\alpha = a_c + \dfrac{\tau}{D}\,(a_n - a_c)$.
+
+Worked example with the starter's day layer, keyframes $\{4000\!:\!1,\ 8000\!:\!1,\ 16000\!:\!0,\ 20000\!:\!0\}$, at
+$T = 0$ (6 AM). No keyframe is at or before 0, so step 3 wraps: $k_c = 20000$ with $a_c = 0$, and $k_n = 4000$ with
+$a_n = 1$. Then $D = 24000 - 20000 + 4000 = 8000$. Since $T < k_n$, $\tau = 24000 - 20000 + 0 = 4000$. So
+$\alpha = 0 + \tfrac{4000}{8000}(1 - 0) = 0.5$.
+
+**Blending.** The included tabs, in order, are layers $1 \ldots m$, with alphas $\alpha_1 = 1$ (the base) and
+$\alpha_i = \text{fadeAlpha}_i(T)$. Write $S_i$ for a layer's texture colour and $s_i$ for its texture alpha. Each
+layer is drawn over what is already there:
+
+$$C_1 = s_1 S_1 + (1 - s_1)\,C_0, \qquad C_i = \alpha_i s_i\,S_i + (1 - \alpha_i s_i)\,C_{i-1}$$
+
+where $C_0$ is whatever is behind the sky (Nuit: the cleared screen). For opaque atlases ($s_i = 1$) and two tabs,
+this is $C = \alpha\,\text{Day} + (1 - \alpha)\,\text{Night}$, on the raw PNG values (section 11, decision 8).
+The hero is the top layer, $m + 1$, always at alpha 1.
+
+**One included tab** has no blending: it is the base, written with empty keyframes, and only spins.
+
+### 17.3 Decisions (2026-10-25)
+
+| # | Topic | Decision |
+|---|---|---|
+| 1 | Hero | **Shared** by all tabs: one `sky3_image.json`, always on. Several heroes stay a stretch goal. |
+| 2 | A tab holds | A name, its sky (file, type, face size, left edge), its fade keyframes, and Include. |
+| 3 | Layer order | Tab order is layer order. **The first included tab is the base**: always on, written with empty keyframes. Layer numbers are automatic: included skies 1…m in tab order, the hero m + 1 (its Layer box becomes a read-out). Tabs can be reordered, renamed and deleted, as long as one tab is left. |
+| 4 | Keyframe editor | Rows of tick, clock time and alpha, with add and delete, and a small graph of alpha over the day. The duration is fixed at 24000. The base tab shows no editor. |
+| 5 | A non-base tab with no keyframes | **Amber** warning: it is always on and hides every layer below it. New tabs start this way. |
+| 6 | Template → tabs | Loading a template builds one tab per sky layer, with that layer's texture as its sky and its keyframes as their defaults. Anything you have set in a tab stays. |
+| 7 | Excluded tabs | Their layer JSON, and their texture if nothing else uses it, are **removed** from the zip. |
+| 8 | Writing sky layers | Keep every field of the template's layer, change only `texture`, `layer` and `fade.keyFrames`, and drop the ignored `fade.alwaysOn` and top-level `blend`. A new tab's layer is copied from the starter's day layer and named `sky<layer>_<tab>.json`, with its texture at `<template's sky folder>/<tab>.png`. |
+| 9 | Included tab with no sky | **Amber** warning, and the default sky goes in (17.6). |
+| 10 | Per-tab export | Each tab gets **Copy** and **Download** for its layer JSON. |
+| 11 | Preview | **All, blended by time** (default) or **This tab only**. With one included tab, the preview shows that sky, just spinning. |
+| 12 | Saving | No Save button. Switching tabs keeps that tab's edits and saves at once; everything is remembered across reloads, as now. |
+| 13 | Old sessions | A remembered single sky becomes the Day tab's sky. |
+| 14 | `alwaysOn` bug | Fixed as part of this feature (17.1). |
+
+### 17.4 Tabs: the model (`src/tabs.ts`, pure, new)
+
+```ts
+export interface FadeKey { tick: number; alpha: number }   // like a Java record (int tick, float alpha)
+
+export interface SkyTab {
+  id: string;                    // stable, never shown: names IndexedDB slots ("sky:<id>")
+  name: string;                  // "Night", "Day", "Sunrise"…; unique, case-insensitive
+  include: boolean;
+  sky: {
+    source: 'user' | 'template' | 'default';   // where the preview's (and the pack's) atlas comes from
+    name: string; type: SkyType; faceSize: number | null; leftBearingDeg: number;
+  };
+  keyFrames: FadeKey[];
+  /** True once the user edits the keyframes; until then a new template's keyframes replace them (decision 6). */
+  keyFramesEdited: boolean;
+  /** The template layer this tab writes: its JSON path and texture path. Null for a tab the template doesn't have. */
+  templateLayer: { file: string; texturePath: string | null; duration: number } | null;
+}
+```
+
+Pure functions (no DOM, no Three.js; tested in `tests/tabs.test.ts`):
+
+| Function | What it does |
+|---|---|
+| `tabsFromTemplate(info)` | One tab per sky layer, sorted by the layer's own `layer` value. Name from the file: `sky2_day.json` → strip `sky<digits>_` and `.json` → "Day" (or "Layer 2" if nothing is left). Keyframes from the file. Sky `source: 'template'`. |
+| `mergeTemplate(tabs, info)` | For a newly loaded template: a tab whose name matches a template layer (case-insensitive) takes that layer's paths, and its keyframes too unless `keyFramesEdited`. A user sky stays `user`. Unmatched template layers become new tabs at the end; unmatched tabs stay, as new layers. |
+| `layerPlan(tabs)` | The included tabs in order, each with its layer number $1\ldots m$ and whether it is the base, plus the hero's layer $m + 1$. |
+| `slugify(name)` | A file-safe name for a new tab: lower case, spaces to `_`, only `[a-z0-9_-]`; empty → `sky<n>`. |
+| `keyFrameProblems(keys)` | Per row: a tick that isn't a whole number in $[0, 24000)$, or a repeated tick, is **red** (Nuit would throw and the layer would not load); export and Assemble ask first, as for the hero's red errors. Alphas are clamped to [0, 1] as typed, as Nuit does. |
+| `tabWarnings(tabs)` | Amber: a non-base included tab with no keyframes (decision 5), an included tab with no sky (decision 9), no included tabs (the vanilla sky shows behind the hero). |
+| `layerJson(tab, plan, templateFiles)` | The tab's layer file as text (decision 8): the template's JSON with `texture`, `layer` and `fade.keyFrames` set (empty for the base) and `fade.alwaysOn` and the top-level `blend` removed; or, for a new tab, the starter's `sky2_day.json` with the same changes. Written with `JSON.stringify(…, null, 2)` plus a newline. |
+
+Fade `duration`: the editor works in 24000-tick days. A template layer with another duration keeps its keyframes,
+which are written with `duration: 24000` and an amber note. A keyframe at or past 24000 is a red row (17.4).
+
+### 17.5 Preview (`scene.ts`)
+
+- **One face set per tab.** `skyFaces` becomes one `Group` of six face meshes per tab, all inside `spinGroup`, built
+  as now (`facePlacement`, cropped cells, nearest filtering, no colour conversion). The left-edge preview turn
+  (section 13.7) turns only that tab's group.
+- **Draw order.** Three.js draws all opaque meshes before all transparent ones, and sorts each list by `renderOrder`.
+  So the base layer is opaque (`renderOrder` 0), the other layers are transparent with `renderOrder` $i$ and
+  `opacity` $= \alpha_i$, and the hero and overlay move to `renderOrder` 1000 and 2000, above any number of tabs.
+  `MeshBasicMaterial` with `opacity` α and `NormalBlending` (no premultiplied alpha) computes exactly
+  $\alpha s\,S + (1 - \alpha s)\,C$, Nuit's "normal" blend with `ColorModulator (1, 1, 1, α)`. A layer at alpha 0 is
+  hidden, as Nuit drops it. Every sky material has `depthTest` and `depthWrite` off.
+- **Modes.** *All, blended by time:* the included tabs as in 17.2; excluded tabs are hidden, and if the open tab is
+  excluded a note says so. *This tab only:* the open tab alone, opaque, plus the hero. With one included tab, both
+  modes show it at alpha 1.
+- `scene.setSkyLayers(layers: { id, alpha, opaque }[])` sets the order, alphas and visibility each time the time,
+  tabs or mode change; `scene.setAtlas(id, image, faceSize)` and `scene.setSkyTurnDeg(id, Δ)` take a tab id.
+- **The time readout** adds each included tab's alpha, e.g. `14:00 · θ 30.1° · Night 1 · Day 1.00 · the hero faces N 30° W`.
+- **Memory.** Each tab keeps six face textures on the GPU (about 96 MB for 2048 px faces). Four such tabs are fine
+  on a desktop. A deleted tab's textures are freed.
+
+### 17.6 The default sky (decision 9)
+
+An included tab with no sky of its own (no file, and no texture in the template) uses the starter's guide atlas:
+`starter_pack/…/night.png` for the base tab, `day.png` for the others. Both are labelled 3:2 guide atlases with
+1024 px faces and are already bundled (section 16.7). The preview shows the same atlas, so preview and pack agree.
+The tab's status line and the pack report both say "using the default sky" (amber).
+
+*This reads "the default sky template" in your answer as the starter's guide atlases. If you meant the plain
+`placeholder_atlas.png`, it's a one-line change.*
+
+### 17.7 UI
+
+```
+┌ Sky Builder ─────────────────────────── [Reset] ┐
+│ [ Night ][ Day ][ + ]           ← tab strip     │
+│ ┌ Day ─────────────────────────────────────────┐│
+│ │ Name [Day      ]   [✓] Include in the pack   ││
+│ │ Layer 2 · assets/nuit/sky/sky2_day.json      ││
+│ │ Sky  [Auto ▾] [Choose file]  status…         ││
+│ │      (face size, left edge, Download atlas)  ││
+│ │ Fade                                         ││
+│ │   ╭──────╮         ╭─ alpha over the day ─   ││
+│ │   tick   clock  alpha                        ││
+│ │   [4000]  10:00 [1.00] [×]                   ││
+│ │   [8000]  14:00 [1.00] [×]   …               ││
+│ │   [+ Add at the current time] [Template's]   ││
+│ │ [Copy] [Download sky2_day.json]              ││
+│ │ [◀ Move] [Move ▶]  [Delete tab]              ││
+│ └──────────────────────────────────────────────┘│
+│ Hero image, Hero, Readouts, Preview (+ mode),   │
+│ sky3_image.json, Resource pack (as now)         │
+```
+
+- **Tab strip** at the top of the panel. A tab button shows its name, dimmed when excluded, and "base" on the first
+  included tab. **+** adds a tab named "Sky 3", "Sky 4"… with only the essentials (no sky, no keyframes, Include on,
+  default type and left edge; the hero and pack settings are shared anyway), and opens it. Tabs can be **dragged** to reorder; the
+  Move buttons do the same from the keyboard. The page's file drop handling ignores these drags, since they carry no
+  files. A tab strip like this is a set of `<button role="tab">` elements, much like a Swing `JTabbedPane`.
+- **Tab content.** The existing Sky row (type, file, status, face size, left edge, Download atlas) moves in, unchanged
+  apart from acting on the open tab. **Name** must be unique and non-empty. **Delete tab** asks first and is disabled
+  for the last tab. For the base, the Fade area says "Base layer: always on, so it has no keyframes". A base that has
+  keyframes keeps them, unused, for when it stops being the base.
+- **Keyframe editor.** Rows sorted by tick; each tick box shows its clock time beside it. **Add at the current time**
+  adds a row at the preview's tick, with the alpha the tab has there. **Template's** puts back the template layer's
+  keyframes. The graph is a small inline SVG: the alpha sampled every 100 ticks, dots at the keyframes, and a line at
+  the preview time. Red and amber problems show under the rows.
+- **Per-tab export:** **Copy** and **Download `<file name>`** give `layerJson` for the open tab, after the same
+  confirm as the hero when there is a red problem. An excluded tab has none, and says why.
+- **Files section.** The Sky row leaves it; the Hero image row stays. The panel's hint and the Reset label change to
+  "sky tabs and hero".
+- **Output section.** The hero's **Layer** box becomes a read-out ("Layer 3: above the 2 included skies").
+- **Preview section** gains **Show: All, blended by time / This tab only**.
+- **Resource pack section.** "Sky goes to" is removed. A summary lists what the pack will hold, such as "Night
+  (layer 1, base) · Day (layer 2) · hero (layer 3) · Sunrise: not included", with the amber warnings from
+  `tabWarnings`.
+- **Drops.** A sky image dropped anywhere goes to the **open tab**, and the note names it ("went to the Day tab's sky").
+
+### 17.8 Pack assembly (`pack.ts`)
+
+`assemblePack(template, inputs)` takes the tabs instead of `skyTarget`. For each tab, in order:
+
+| Tab | Layer JSON | Texture |
+|---|---|---|
+| Included, from the template | `layerJson` at the template's path | User sky → its PNG at the template's texture path. Template sky → left as it is. |
+| Included, new | `layerJson` at `assets/nuit/sky/sky<layer>_<slug>.json` | `<folder>/<slug>.png`: the user's PNG, or the default sky (17.6) |
+| Excluded, from the template | removed | removed, unless another layer or the hero uses the same path |
+| Excluded, new | nothing | nothing |
+
+- `<folder>` is the folder of the base layer's template texture (`assets/sasheen/textures/sky/`). Without one, it is
+  the hero texture's folder. A clash with a file already in the pack (including the hero's texture) adds `_2`, `_3`…
+- The hero's JSON gets layer $m + 1$ through the normal JSON path (`state.hero.layer` is set by `layerPlan`). An
+  imported, pinned JSON keeps its uvRange and mapping; only its layer changes (`editPinned`), with a note.
+- Other Nuit layers in the template (decorations, monocolor, a second hero) are copied unchanged, with an amber note if
+  their `layer` value falls among the renumbered ones.
+- Existing warnings stay: rotation mismatch, top-level `blend` (now also "and it was removed"), atlas over 8192 px.
+- Red keyframe problems (17.4) are asked about first, like the hero's red errors.
+- **Bug fix (17.1):** `readTemplate` reports each sky layer's `layer` value and keyframes, and no longer reads `alwaysOn`.
+  `SkyTarget` and `Session.packSky` are removed.
+
+### 17.9 Saving (`saved.ts`, `imagestore.ts`, `main.ts`)
+
+- **Settings:** a new key `sky-builder/v2` holds the hero, view, preview mode, open tab, and the tabs without their
+  images. It is saved half a second after a change, as now, and **at once when you switch tabs** (decision 12).
+- **Images:** IndexedDB slots become `sky:<tab id>`, plus `hero` and `pack` as now. Excluding a tab keeps its
+  image; deleting the tab, or Reset, forgets it.
+- **Migration (decision 13):** with no v2 entry, a v1 entry's hero, view and sky settings are read, and its stored
+  `sky` image becomes the Day tab's sky. The other tabs come from the template (the remembered one, or the starter).
+  `packSky` is dropped. The v1 key and slot are then deleted.
+- **Start-up:** tabs from the saved settings, then each tab's image as it loads (panoramas re-convert, one worker per
+  tab). Without saved settings: tabs from the starter (Night, base, and Day, both included), so the default preview
+  at noon shows the starter's day guide atlas. `placeholder_atlas.png` is still the sample for M2-style checks: load it
+  into a tab, or use This tab only.
+- **Reset** returns to the starter's tabs and forgets every stored image and the template.
+
+### 17.10 Tests
+
+- `math.fadeAlpha`: the starter's keyframes at 0, 2000, 6000, 12000, 18000 and 22000 give 0.5, 0.75, 1, 0.5, 0 and
+  0.25; empty gives 1; one keyframe is constant; unsorted input; a keyframe at tick 0; equal neighbours. Plus an
+  **independent check**: for random keyframe sets, every 10 ticks matches a plain periodic linear interpolation (the
+  keyframes repeated over three days), which shares no code with the port.
+- `tabs.test.ts`: `tabsFromTemplate` on the starter (Night base, Day with its four keyframes), on a template **without**
+  `alwaysOn` (the bug), and with layers in an odd file order; `mergeTemplate` keeping user skies and edited
+  keyframes; `layerPlan` with exclusions and reordering; `slugify`; `keyFrameProblems`; `tabWarnings`; `layerJson` (only
+  the three fields change, `alwaysOn` and top-level `blend` gone, base written with `{}`).
+- `pack.test.ts`, rewritten for tabs: every row of the 17.8 table; one included tab; none; a shared texture kept; name
+  clashes; the zip round trip; the starter with its default tabs gives an unchanged pack apart from the planned edits.
+- `saved.test.ts`: v2 round trip, a damaged tab dropped field by field, and the v1 migration.
+- `view.test.ts`: draw order and opacity for several tabs, opaque base, and modes.
+- **Headless Edge**, as before: the starter's tabs at 6 AM, noon, 6 PM and midnight (Day alpha 0.5, 1, 0.5, 0); a
+  panorama in a new Sunrise tab with keyframes; Include off/on and the pack's file list; per-tab Download bytes equal
+  to the zip's; reload restores the tabs and images; a v1 session migrates.
+- **Your check in game:** the assembled pack at `/time set 0`, `6000`, `12000` and `18000` against the preview at the
+  same ticks.
+
+### 17.11 Commits, on branch `sky-tabs`
+
+1. `fix(pack)`: sky layer roles from empty `keyFrames`, not `alwaysOn`, with the test for a template without it.
+2. `feat(math)`: `fadeAlpha`, with its tests.
+3. `feat(tabs)`: the pure tab model and `layerJson`, with tests.
+4. `feat(pack)`: assembly from tabs, with tests; `saved.ts` v2 and migration, with tests.
+5. `feat(scene)`: one face set per tab, opacity and modes, with `view.test.ts`.
+6. `feat(ui)`: the tab strip, tab content, keyframe editor and graph, preview mode, pack summary, and the wiring in `main.ts`.
+7. `docs`: BRIEF (17.12), the as-built notes here, the README and its screenshots.
+
+### 17.12 BRIEF changes (applied with commit 7, or first if you prefer)
+
+- **§2:** the pack has one sky layer per included tab (the first is the always-on base; the rest fade by keyframes)
+  and the hero on top; the tool now also writes the sky layer files.
+- **§4:** a new **4.9 Fade and layer order**, from 17.1 and 17.2, citing `Fade.java`, `AbstractSkybox.updateAlpha` and
+  `SkyboxManager`; and that `alwaysOn` isn't a 26.2 field.
+- **§5:** the hero's `layer` is set automatically to $m + 1$.
+- **§8:** sky inputs per tab; the keyframe editor; Include; per-tab export; the Layer box becomes a read-out; "Sky goes
+  to" removed.
+- **§9:** the crossfade moves from "Stretch" to required, for $n$ layers.
+- **§10:** the day/night menu is done; several heroes stays a stretch goal.
+- **§13:** the three Nuit files above.
+- **§14:** a "Sky tabs" milestone with the checks in 17.10.
+
+---
+
+*Sources checked:* the Nuit 26.2/dev files listed above, plus `Fade.java`, `AbstractSkybox.java` and
+`SkyboxManager.java` for section 17; vanilla 26.2 `data/minecraft/timeline/day.json` via
 [misode/mcmeta](https://github.com/misode/mcmeta/blob/26.2-data/data/minecraft/timeline/day.json); Minecraft Wiki,
 [Environment attribute](https://minecraft.wiki/w/Environment_attribute) and [Timeline](https://minecraft.wiki/w/Timeline);
 three r186 (installed) for the Euler check.
