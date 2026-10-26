@@ -1491,8 +1491,19 @@ The tab's status line and the pack report both say "using the default sky" (ambe
 **Tests:** 214 in all, adding `fadeAlpha` (with the independent periodic check), `tabs.test.ts`, `assembleTabs`, the
 blended draw order in `view.test.ts`, and v2 sessions with the v1 migration.
 
-**Still to do:** the developer's check in game. Assemble with the starter's tabs, then compare the preview with the
-game at `/time set 0`, `6000`, `12000` and `18000`.
+**In game (2026-10-25):** the developer's check passed. An assembled pack matched the preview at `/time set 0`, `6000`,
+`12000` and `18000`.
+
+**UI text trimmed (2026-10-25, at the developer's request):**
+- **Removed:** the explanatory hints (sky tabs, Files, remembered settings, the noon-bearing line under Turn ψ, the
+  hero's layer read-out and the Resource pack intro), and the status line for a template or default sky.
+- **Shortened:**
+  - the tab's layer line, to `Layer 1 (base): <file>`;
+  - the overlay checkbox, to "Toggle overlay";
+  - the starter's template line.
+- **Separators:** the `·` separator in UI text is replaced by `/` throughout: statuses, the time line, the HUD,
+  readouts and the overlay's face labels. An example is `noon.png/2304 × 1536/faces 768 px`, and the time line ends in
+  `/hero facing north`.
 
 ---
 

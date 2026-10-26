@@ -5,7 +5,7 @@ import {
   FACE_WARN_LIMIT, K_RANGE, PANO_FACE_RANGE, PANO_LEFT_BEARING_RANGE, PLAY_SPEEDS, RANGES, TICKS_PER_DAY, TIME_MARKS,
 } from './constants.ts';
 import {
-  fadeAlpha, heightFromK, kFromHeight, mcFacing, mcYawPitch, noonBearingDeg, quadrantBearing, ticksToClock,
+  fadeAlpha, heightFromK, kFromHeight, mcFacing, mcYawPitch, quadrantBearing, ticksToClock,
 } from './math.ts';
 import type { FadeKey, HeroMode, HeroParams, PreviewMode, Readouts, Sky3Json, SkyType, ViewState } from './schema.ts';
 import type { TabNote } from './tabs.ts';
@@ -163,12 +163,12 @@ function clockText(ticks: number): string {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }
 
-/** "due north", "N 30.00° W", "S 12.50° E": a bearing as words. */
+/** "north", "N 30.00° W", "S 12.50° E": a bearing as words. */
 function facingText(bearingDeg: number): string {
   const q = quadrantBearing(bearingDeg);
-  const deg = fixed(q.deg, 2); // judge "due" on the shown value: at midnight the bearing is a hair off 180°
-  if (Number(deg) === 0) return `due ${q.from === 'N' ? 'north' : 'south'}`;
-  if (Number(deg) === 90) return `due ${q.to === 'E' ? 'east' : 'west'}`;
+  const deg = fixed(q.deg, 2); // judge on the shown value: at midnight the bearing is a hair off 180°
+  if (Number(deg) === 0) return q.from === 'N' ? 'north' : 'south';
+  if (Number(deg) === 90) return q.to === 'E' ? 'east' : 'west';
   return `${q.from} ${deg}° ${q.to}`;
 }
 
@@ -193,7 +193,6 @@ export class Ui {
   private readonly leftBearingNum = byId<HTMLInputElement>('left-bearing-num');
   private readonly fileInputs = ['sky-file', 'hero-file', 'import-file', 'pack-file'].map((id) => byId<HTMLInputElement>(id));
   private readonly packSummary = byId<HTMLUListElement>('pack-summary');
-  private readonly heroLayer = byId<HTMLParagraphElement>('hero-layer');
   private readonly tabStrip = byId<HTMLDivElement>('tab-strip');
   private readonly tabName = byId<HTMLInputElement>('tab-name');
   private readonly tabNameProblem = byId<HTMLParagraphElement>('tab-name-problem');
@@ -227,7 +226,6 @@ export class Ui {
   private readonly modeRows = [...document.querySelectorAll<HTMLElement>('[data-mode]')];
   private readonly texture = byId<HTMLInputElement>('texture');
   private readonly textureProblem = byId<HTMLParagraphElement>('texture-problem');
-  private readonly turnHint = byId<HTMLParagraphElement>('turn-hint');
   private readonly readouts = byId<HTMLDListElement>('readouts');
   private readonly warnings = byId<HTMLUListElement>('warnings');
   private readonly jsonOut = byId<HTMLPreElement>('json-out');
@@ -424,7 +422,7 @@ export class Ui {
     // Also what Minecraft's F3 screen would show for the same view, to line the preview up with the game.
     const mc = mcYawPitch(view.yawDeg, view.pitchDeg);
     this.hud.textContent =
-      `Bearing ${fixed(view.yawDeg, 1)}° · pitch ${fixed(view.pitchDeg, 1)}° · FOV ${Math.round(view.fovDeg)}\n`
+      `Bearing ${fixed(view.yawDeg, 1)}°/pitch ${fixed(view.pitchDeg, 1)}°/FOV ${Math.round(view.fovDeg)}\n`
       + `In game (F3): Facing ${mcFacing(view.yawDeg)} (${fixed(mc.yaw, 1)} / ${fixed(mc.pitch, 1)})`;
   }
 
@@ -443,7 +441,6 @@ export class Ui {
 
     // Everything below describes the JSON, the values Nuit will read.
     const [x, y] = json.properties.rotation.mapping['0'];
-    this.turnHint.textContent = `At noon the hero faces ${facingText(noonBearingDeg(y))}. Positive ψ turns it toward the west.`;
 
     // The cell-edge limits apply to how far the hero reaches on the face, max |t| and max |s|.
     // In tilted mode those are exactly k and ak; in wall mode the top edge t_t sets the vertical one.
@@ -453,12 +450,12 @@ export class Ui {
     const rows: [string, string][] = [
       ['Image aspect a', `${fixed(r.aspect, 4)} (${hero.imageW} × ${hero.imageH})`],
       ['Half-size k, ak', sized(`${fixed(r.k, 4)} high, ${fixed(r.ak, 4)} wide (face units)`)],
-      ['Reach |t|', sized(`${fixed(FACE_WARN_LIMIT - r.margins.k, 4)} · ${margin(r.margins.k, 3, String(FACE_WARN_LIMIT))}`)],
-      ['Reach |s|', sized(`${fixed(FACE_WARN_LIMIT - r.margins.ak, 4)} · ${margin(r.margins.ak, 3, String(FACE_WARN_LIMIT))}`)],
+      ['Reach |t|', sized(`${fixed(FACE_WARN_LIMIT - r.margins.k, 4)}/${margin(r.margins.k, 3, String(FACE_WARN_LIMIT))}`)],
+      ['Reach |s|', sized(`${fixed(FACE_WARN_LIMIT - r.margins.ak, 4)}/${margin(r.margins.ak, 3, String(FACE_WARN_LIMIT))}`)],
       ['Angular size', sized(`${fixed(r.heightDeg, 2)}° high × ${fixed(r.widthDeg, 2)}° wide`)],
-      ['Top edge', `${fixed(r.topDeg, 2)}° · ${margin(r.margins.zenithDeg, 2, '90', '°')}`],
+      ['Top edge', `${fixed(r.topDeg, 2)}°/${margin(r.margins.zenithDeg, 2, '90', '°')}`],
       ['Bottom edge', `${fixed(r.bottomDeg, 2)}°`],
-      ['Mapping', `X ${fixed(x, 2)} · Y ${fixed(y, 2)}`],
+      ['Mapping', `X ${fixed(x, 2)}/Y ${fixed(y, 2)}`],
     ];
     this.readouts.replaceChildren(...rows.flatMap(([term, value]) => {
       const dt = document.createElement('dt');
@@ -483,9 +480,9 @@ export class Ui {
    * faces at this time.
    */
   showTime(ticks: number, thetaDeg: number, heroBearingDeg: number, layers: readonly { name: string; alpha: number }[]): void {
-    const alphas = layers.map((l) => ` · ${l.name} ${fixed(l.alpha, 2)}`).join('');
-    this.timeReadout.textContent = `${clockText(ticks)} (tick ${Math.round(ticks)}) · θ ${fixed(thetaDeg, 1)}°${alphas}`
-      + ` · the hero faces ${facingText(heroBearingDeg)}`;
+    const alphas = layers.map((l) => `/${l.name} ${fixed(l.alpha, 2)}`).join('');
+    this.timeReadout.textContent = `${clockText(ticks)} (tick ${Math.round(ticks)})/θ ${fixed(thetaDeg, 1)}°${alphas}`
+      + `/hero facing ${facingText(heroBearingDeg)}`;
   }
 
   // --- Sky tabs (PLAN §17.7) ------------------------------------------------------------------
@@ -673,11 +670,6 @@ export class Ui {
   showPreviewMode(mode: PreviewMode, note: string): void {
     this.previewMode.value = mode;
     this.previewNote.textContent = note;
-  }
-
-  /** The hero's layer, now set by the included tabs (decision 17.3.3). */
-  showHeroLayer(text: string): void {
-    this.heroLayer.textContent = text;
   }
 
   /** What Assemble pack will put in, and anything to look at first. */

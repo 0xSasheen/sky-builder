@@ -22,10 +22,6 @@
 
         <section class="sky-tabs">
           <h2>Sky tabs</h2>
-          <p class="hint">
-            One tab per sky layer. The first included tab is the base, always on; each tab after it fades in over
-            the ones before by its keyframes. Drag a tab to reorder it.
-          </p>
           <div class="tab-strip" role="tablist" aria-label="Sky tabs" id="tab-strip"></div>
           <div class="tab-panel" role="tabpanel" id="tab-panel">
             <div class="field pick">
@@ -105,7 +101,6 @@
 
         <section>
           <h2>Files</h2>
-          <p class="hint">Choose files, or drop them on a row or anywhere on the page. A sky image goes to the open tab.</p>
           <label class="field" data-drop="hero">
             <span>Hero image</span>
             <input type="file" id="hero-file" accept="image/png,image/*" />
@@ -118,7 +113,6 @@
             <input type="number" id="image-h" min="1" step="1" aria-label="Hero height in pixels" />
           </div>
           <p class="status" id="drop-status" role="status"></p>
-          <p class="hint">Your files and settings are remembered in this browser only. Reset forgets them.</p>
         </section>
 
         <section>
@@ -158,7 +152,6 @@
             <input type="range" id="turn" step="0.1" />
             <input type="number" id="turn-num" step="0.01" aria-label="Mapping Y in degrees" />
           </div>
-          <p class="hint" id="turn-hint"></p>
         </section>
 
         <section>
@@ -205,7 +198,7 @@
           <p class="hint" id="preview-note"></p>
           <label class="check">
             <input type="checkbox" id="overlay" />
-            <span>Overlay: cube edges and face table (magenta), horizon and compass (cyan)</span>
+            <span>Toggle overlay</span>
           </label>
         </section>
 
@@ -216,7 +209,6 @@
             <input type="text" id="texture" spellcheck="false" autocomplete="off" />
           </label>
           <p class="status error" id="texture-problem" role="status"></p>
-          <p class="hint" id="hero-layer"></p>
         </section>
 
         <section>
@@ -243,10 +235,6 @@
 
         <section>
           <h2>Resource pack</h2>
-          <p class="hint">
-            Builds a pack from a template: each included sky tab's layer and sky, the hero, its .mcmeta and this JSON
-            go in. Layers of tabs that aren't included are left out; the rest of the template is copied as it is.
-          </p>
           <div class="field" data-drop="pack">
             <label for="pack-file">Template (.zip)</label>
             <input type="file" id="pack-file" accept=".zip,application/zip" />

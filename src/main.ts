@@ -228,9 +228,6 @@ function showJson(): void {
     readouts: currentReadouts(),
     textureProblem: textureProblem(json.animatableTextures[0].texture),
   });
-  const skyCount = layerPlan(tabs).layers.length;
-  ui.showHeroLayer(`Layer ${json.properties.layer}: above the ${skyCount} included sky ${skyCount === 1 ? 'tab' : 'tabs'}. `
-    + 'It follows the sky tabs.');
   showTime();
   ui.showExportStatus(''); // a note about the last export no longer applies to a changed JSON
   scheduleSave();
@@ -442,15 +439,14 @@ function refreshTabs(): void {
   const notes = tabNotes(tabs, template);
   const planned = plan.layers.find((l) => l.tab.id === tab.id);
   const out = outputs.find((o) => o.tabId === tab.id);
-  const source = skySource(tab, template);
 
   const view: OpenTabView = {
     id: tab.id,
     name: tab.name,
     include: tab.include,
     layerText: planned && out
-      ? `Layer ${planned.layer}${planned.base ? ', the base: always on' : ''} · ${out.jsonPath}`
-      : 'Not included, so this layer is left out of the pack.',
+      ? `Layer ${planned.layer}${planned.base ? ' (base)' : ''}: ${out.jsonPath}`
+      : 'Not included in the pack.',
     base: planned?.base ?? false,
     keyFrames: tab.keyFrames,
     problems: keyFrameProblems(tab.keyFrames),
@@ -464,9 +460,6 @@ function refreshTabs(): void {
     count: tabs.length,
   };
   ui.showTabs(tabs.map((t) => ({ id: t.id, name: t.name, include: t.include, base: plan.layers[0]?.tab.id === t.id })), view);
-  if (source === 'default' && !runningLoad(tab.id)) {
-    setSkyStatus(tab.id, `No sky of its own: showing the default sky (the starter's ${isBase(tab.id) ? 'night' : 'day'} guide atlas).`);
-  }
 
   const describe = (t: SkyTab): string => {
     const s = skySource(t, template);
@@ -537,7 +530,6 @@ function skyState(tabId: string): TabSkyState {
 }
 
 const isBase = (tabId: string): boolean => layerPlan(tabs).layers[0]?.tab.id === tabId;
-const runningLoad = (tabId: string): boolean => skies.get(tabId)?.converter != null;
 
 /** A tab's status line; shown at once if it is the open tab. */
 function setSkyStatus(tabId: string, text: string, isError = false): void {
@@ -598,7 +590,7 @@ async function loadAtlasBytes(tabId: string, bytes: Uint8Array, label: string): 
   if (layout.ok) {
     scene.setAtlas(tabId, image, layout.faceSize);
     s.shownLeftBearing = null;
-    setSkyStatus(tabId, `Showing ${label} · ${image.width} × ${image.height} atlas.`);
+    setSkyStatus(tabId, ''); // the template's texture or the default: nothing to report
   } else {
     setSkyStatus(tabId, `${label}: ${layout.message}`, true);
   }
@@ -682,7 +674,7 @@ async function loadUserSky(tabId: string): Promise<void> {
       const faceSize = clamp(Math.round(tab.sky.faceSize ?? layout.faceSize), PANO_FACE_RANGE.min, PANO_FACE_RANGE.max);
       s.panorama = { faceSize, leftBearingDeg };
       if (tabId === openTabId) ui.showPanoramaOptions(s.panorama);
-      convertPanorama(tabId, image, faceSize, leftBearingDeg, `${name} · ${size} panorama, left edge ${leftBearingDeg}°`, name);
+      convertPanorama(tabId, image, faceSize, leftBearingDeg, `${name}/${size} panorama/left edge ${leftBearingDeg}°`, name);
       return;
     }
     const hint = shape === 'atlas' ? ' It is 3:2, so choose Atlas or Auto.' : '';
@@ -694,7 +686,7 @@ async function loadUserSky(tabId: string): Promise<void> {
       s.shownLeftBearing = null;
       s.forPack = { blob: s.file, width: image.width };
       rememberSky(tabId);
-      setSkyStatus(tabId, `${name} · ${size} atlas · faces ${layout.faceSize} px`);
+      setSkyStatus(tabId, `${name}/${size}/faces ${layout.faceSize} px`);
     } else {
       const hint = shape === 'panorama' ? ' It is 2:1, so choose Panorama or Auto.' : '';
       setSkyStatus(tabId, `${name}: ${layout.message}${hint} ${keep}`, true);
@@ -740,7 +732,7 @@ function convertPanorama(tabId: string, image: ImageBitmap, faceSize: number, le
       s.forPack = { blob: reply.png, width: 3 * faceSize };
       rememberSky(tabId);
       const seconds = ((performance.now() - started) / 1000).toFixed(1);
-      setSkyStatus(tabId, `${label} → atlas ${3 * faceSize} × ${2 * faceSize} (faces ${faceSize} px) · ${seconds} s`);
+      setSkyStatus(tabId, `${label} → ${3 * faceSize} × ${2 * faceSize}/faces ${faceSize} px/${seconds} s`);
       refreshTabs();
     } else {
       scene.setSkyTurnDeg(tabId, 0);
@@ -782,13 +774,13 @@ async function loadHero(
     return;
   }
   scene.setHeroImage(image); // the scene owns the image from here on
-  ui.showHeroStatus(`${name} · ${image.width} × ${image.height}`);
+  ui.showHeroStatus(`${name}/${image.width} × ${image.height}`);
   heroForPack = source;
   if (options.remember) void saveImage('hero', { name, blob: source });
   if (!options.keepSize) {
     updateHero({ imageW: image.width, imageH: image.height }, true);
   } else if (options.standIn && (image.width !== state.hero.imageW || image.height !== state.hero.imageH)) {
-    ui.showHeroStatus(`${name} · ${image.width} × ${image.height}, standing in at your saved size `
+    ui.showHeroStatus(`${name}/${image.width} × ${image.height}, standing in at your saved size `
       + `${state.hero.imageW} × ${state.hero.imageH}. Load your hero image again to see it.`);
   }
 }
@@ -923,8 +915,7 @@ async function starterFiles(): Promise<PackFiles> {
 }
 
 function showStarterStatus(): void {
-  ui.showPackStatus(`Template: the starter (${STARTER_NAME}), with placeholder skies and a test hero. `
-    + 'Choose or drop your own template to use it instead.');
+  ui.showPackStatus(`Template: the starter (${STARTER_NAME})`);
 }
 
 /**
@@ -958,7 +949,7 @@ async function loadPackTemplate(source: Blob, name: string, options: { remember:
   packTemplate = { name, files };
   if (options.remember) void saveImage('pack', { name, blob: source });
   const count = info.skyLayers.length;
-  ui.showPackStatus(`Template: ${name} · ${files.size} files · ${count} sky ${count === 1 ? 'layer' : 'layers'} and a hero layer.`, false, true);
+  ui.showPackStatus(`Template: ${name}/${files.size} files/${count} sky ${count === 1 ? 'layer' : 'layers'}`, false, true);
   ui.showPackReport(info.warnings.map((text) => ({ level: 'warn', text })));
   if (options.merge) templateChanged(true);
   return true;

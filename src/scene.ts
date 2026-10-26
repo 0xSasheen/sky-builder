@@ -360,7 +360,7 @@ function buildSkyOverlay(group: Group): void {
   group.add(edges);
 
   for (const face of FACES) {
-    const label = textSprite(`${face.name} · cell ${face.col},${face.row}`, SKY_OVERLAY_COLOR, 0.07);
+    const label = textSprite(`${face.name}/cell ${face.col},${face.row}`, SKY_OVERLAY_COLOR, 0.07);
     // Halfway down the face (t = −0.5), clear of the painted name and horizon line.
     const at = new Vector3(...face.centre).addScaledVector(new Vector3(...face.up), -0.5);
     label.position.copy(at.multiplyScalar(0.9));
