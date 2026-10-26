@@ -1,7 +1,8 @@
 # Sky Builder: implementation plan
 
 Status: **All milestones (M1–M5), the panorama input and Assemble pack (section 16) are done, merged and live at <https://0xsasheen.github.io/sky-builder/>** (2026-10-24).
-**Next: sky tabs with day/night blending (section 17), planned 2026-10-25 and waiting for approval.**
+**Sky tabs with day/night blending (section 17) are built and checked on branch `sky-tabs` (2026-10-25)**, waiting for
+the developer's in-game check and the merge.
 Decisions are in sections 11–17.
 
 Contents: 1. Source verification · 2. Architecture · 3. Types · 4. `math.ts` API and tests ·
@@ -208,6 +209,9 @@ src/
   scene.ts       Three.js: sky planes, hero quad, heroGroup, spinGroup, camera, overlay
   view.ts        drag-to-look + "look at hero" / "look north" (camera yaw/pitch only)
   ui.ts          controls, readouts, warnings, file loading, JSON panel, import/export
+  tabs.ts        the sky tabs (section 17): pure, like math.ts
+  pack.ts        reading templates and assembling packs (section 16)
+  saved.ts       what is remembered between visits (sections 15, 17.9)
   main.ts        creates state, wires ui -> state -> json -> scene, owns the render loop
 tests/
   math.test.ts   test vectors §7, scaling, inverse, round trip, spin, constraints
@@ -215,6 +219,8 @@ tests/
   faces.test.ts  Nuit face matrices vs our face table; hero placement (uses three, not the DOM)
   view.test.ts   scene.ts's face meshes and view.ts's camera: the M2 and M3 checks, done geometrically
   panorama.test.ts  panorama → atlas against sky_convert.py's convention and its own output (section 13)
+  tabs.test.ts   the sky tabs, layer plan, layer files and preview layers (section 17)
+  pack.test.ts, saved.test.ts   templates and packs; the saved session and the v1 migration
   png.ts         a small PNG reader for the test fixtures
 ```
 
@@ -1135,7 +1141,7 @@ the starter is used. An uploaded template wins over the starter.
 
 ---
 
-## 17. Sky tabs, with day/night blending (planned 2026-10-25, waiting for approval)
+## 17. Sky tabs, with day/night blending (approved 2026-10-25, built on branch `sky-tabs`)
 
 **Request:** separate day and night skies, blended by time of day as Nuit blends them, with editable fade keyframes.
 They are organised as **tabs** (Day, Night, and later any number more, such as Sunrise or Sunset), and each tab has an
@@ -1413,6 +1419,80 @@ The tab's status line and the pack report both say "using the default sky" (ambe
 - **§10:** the day/night menu is done; several heroes stays a stretch goal.
 - **§13:** the three Nuit files above.
 - **§14:** a "Sky tabs" milestone with the checks in 17.10.
+
+### 17.13 As built
+
+**Where the code is.**
+- `math.fadeAlpha` is the port of Nuit's fade.
+- `src/tabs.ts` holds the pure tab model:
+  - `mergeTemplate`, `layerPlan`, `effectiveKeyFrames`, `previewLayers`, `keyFrameProblems`, `skySource` and
+    `tabNotes`;
+  - `layerJson` and `layerOutputs`, which write the layer files.
+- `pack.ts` has `assembleTabs`, and `readTemplate` now reports each sky layer's `layer` value, keyframes and duration,
+  plus the template's other Nuit layers.
+- `scene.ts` has `layerDrawSettings` (pure) and one face group per tab (`setSkyLayers`, `setAtlas(tabId, …)`,
+  `setSkyTurnDeg(tabId, …)`, `removeSkyLayer`).
+- `saved.ts` has v2 and `fromSavedV1`.
+- `imagestore.ts` has the `sky:<tab id>` slots.
+- The tab strip, panel, keyframe editor, graph, Show selector and pack summary are in `ui.ts` and `index.html`.
+- `main.ts` has the per-tab sky state: its own file, load counter, converter, status, panorama options and
+  pack PNG.
+
+**Differences from the plan.**
+- **Commit order.** Every commit builds and passes its tests. So `assembleTabs` first sat beside `assemblePack`,
+  and `main.ts` showed its single sky as the only layer until the UI commit. That commit then removed
+  `assemblePack`, `SkyTarget` and `Session.packSky`. `saved.ts` v2 moved into the UI commit too, because its
+  `Session` type is tied to `main.ts`.
+- **Template layers.** `readTemplate` keeps a sky layer's `role` (night or day, now from empty keyFrames) as a label.
+  Nothing decides anything by it any more.
+- **Restoring a session** links saved tabs to the remembered template's layers, by file and then by name, without
+  adding a tab for a layer no tab takes. So a deleted tab stays deleted, while loading a template adds missing tabs
+  (decision 6).
+- **Keyframe edits** commit on Enter or when leaving the box, as the whole list. Alphas are clamped to [0, 1] and the
+  rows re-sorted by tick. **Add at the current time** refuses a tick that already has a keyframe, with a note, rather
+  than make a red duplicate.
+- **"Use the template's sky" / "Use the default sky"** appears when a tab has its own sky, and forgets it.
+- **Hero layer.** An imported JSON's layer is replaced by the tabs' hero layer, with an import note when it differs.
+- **Shared names.** A new tab's file name uses its layer number at the time of writing (for example
+  `sky2_sunrise.json` when Night is left out). It can share a `sky<n>_` prefix with another file
+  (`sky3_image.json`); Nuit loads every file in the folder, so only the `layer` values matter.
+
+**Checked in headless Edge** (fresh profiles, the dev server, files picked through the DevTools protocol):
+- **The starter's tabs.**
+  - Night (base) and Day open on the template's guide atlases.
+  - The Day alpha reads 0.50, 1.00, 0.50 and 0.00 at 6 AM, noon, 6 PM and midnight.
+  - The 6 AM view shows the two atlases half blended; midnight shows Night alone.
+- **Editing keyframes.**
+  - Setting Day's 4000 keyframe to 0.6 gives 0.80 at noon; **Template's** restores it.
+  - Tick 24000 gives a red row and a red note.
+- **A new tab.**
+  - **+** makes "Sky 3" (layer 3) with both amber notes, and the hero moves to layer 4.
+  - The name "Day" is refused.
+  - Renamed "Sunrise" with keyframes {0: 0, 23000: 1}, it is at alpha 1 at 05:00.
+- **Excluding Night.**
+  - Day becomes "Layer 1, the base: always on", and its editor is hidden.
+  - The preview note explains that the blend leaves Night out.
+  - The hero goes to layer 3.
+- **Per-tab Download** of Sunrise gives the starter day layer's fields with `texture`
+  `sasheen:textures/sky/sunrise.png`, `layer` 2 and the two keyframes.
+- **Assemble pack**, starter skies:
+  - `sky1_night.json` and `night.png` are left out (with a note), and `sky2_day.json` has layer 1 and `{}`.
+  - `sky2_sunrise.json` and a `sunrise.png` holding the default day atlas are added, and the hero is at layer 3.
+- **Assemble pack**, the tabs' own skies:
+  - Day's `placeholder_atlas.png` goes in byte for byte (49 469 bytes).
+  - Sunrise's panorama, converted in its own worker in 0.5 s, goes in as its converted PNG.
+- **Move**, **Delete**, **This tab only** and **Reset** behave as planned.
+- **A reload** brings back the tabs, Include, the open tab, the keyframes, the time and both tabs' files (the
+  panorama is converted again).
+- **A v1 session** (a v1 entry and the old `sky` image) comes back with its sky as the Day tab's, typed `atlas`,
+  under `sky:<id>`, and with the hero's ψ = 30. The v1 key and the `sky` slot are removed.
+- No console errors throughout.
+
+**Tests:** 214 in all, adding `fadeAlpha` (with the independent periodic check), `tabs.test.ts`, `assembleTabs`, the
+blended draw order in `view.test.ts`, and v2 sessions with the v1 migration.
+
+**Still to do:** the developer's check in game. Assemble with the starter's tabs, then compare the preview with the
+game at `/time set 0`, `6000`, `12000` and `18000`.
 
 ---
 

@@ -61,6 +61,15 @@ All three rotate together, once per in-game day, around the vertical axis.
 Their `rotation` blocks must be identical **except for `mapping`**, which only
 the hero layer changes. Working copies are in `reference/pack-example/`.
 
+**Sky tabs (since 2026-10-25, PLAN §17).** The tool manages the sky layers too, as
+tabs: one tab per `nuit:square-textured` layer, in layer order, so a pack can have
+night and day skies and more (sunrise, sunset, …). The first *included* tab is the
+**base**: always on, written with empty `fade.keyFrames`. Each tab after it fades in
+over the ones before by its keyframes (§4.9). With $m$ included tabs, the skies are
+layers $1 \ldots m$ and the hero is layer $m + 1$. The tool writes each sky layer's
+file too, keeping every field of the template's layer except `texture`, `layer` and
+`fade.keyFrames`.
+
 Textures live at `assets/sasheen/textures/sky/` and are referenced as
 `sasheen:textures/sky/<name>.png`. The JSON files live at `assets/nuit/sky/`.
 
@@ -184,6 +193,17 @@ Confirmed by reading the source (§13), and re-checked during planning (PLAN §1
    own sampler. So vanilla `.mcmeta` rules apply: without `"blur": true` a texture is
    sampled with nearest filtering and no mipmaps (the sky atlases); with it, linear
    filtering (the hero, via `hero.png.mcmeta`). Details in PLAN §1.6.
+9. **Fade and layer order** (`Fade.java`, `AbstractSkybox.updateAlpha`,
+   `SkyboxManager`; PLAN §17.1). A layer's alpha is its fade alpha times a
+   "conditions" alpha, which is 1 in the target environment (§1). `fade` has only
+   `duration` (default 24000) and `keyFrames` (tick → alpha, clamped to [0, 1]);
+   a keyframe outside $[0, \text{duration})$ makes the layer fail to load.
+   **There is no `alwaysOn` field**: empty `keyFrames` means always on. Otherwise
+   the alpha is interpolated **linearly** between the keyframes either side of
+   the time, wrapping round the day, in whole ticks (PLAN §17.2 has the formula).
+   Layers with alpha 0 are skipped; the rest are drawn in `layer` order, each
+   with the "normal" blend and `ColorModulator (1, 1, 1, alpha)`, so for opaque
+   atlases a layer over another shows $\alpha\,S + (1 - \alpha)\,C$.
 
 ---
 
@@ -225,7 +245,8 @@ Rules:
 - Round `uvRange` values to **4 decimal places** and `mapping` to **2**.
 - **Render the preview from the rounded values**, so the preview matches the
   game exactly.
-- Editable fields: `texture`, `layer`, `mapping` (X and Y; Z stays 0) and `uvRange`.
+- Editable fields: `texture`, `mapping` (X and Y; Z stays 0) and `uvRange`.
+  `layer` is set by the sky tabs: $m + 1$ for $m$ included tabs (§2).
 - Everything else stays fixed, especially `speed`, `axis` and `skyboxRotation`,
   which must match the sky layers.
 - Empty `keyFrames` means always visible. `conditions.worlds` is a legacy alias
@@ -326,7 +347,15 @@ then ×1.15 or ×1.5. In the file, `k` values are given unrounded; use them as-i
 ## 8. Functional requirements
 
 ### Inputs
-- **Sky:** file picker plus drag-and-drop, with a type dropdown: **Auto (by
+- **Sky tabs** (PLAN §17): a tab strip at the top of the panel, one tab per sky
+  layer, built from the pack template's sky layers. Tabs can be added, renamed,
+  reordered (drag, or Move) and deleted (one must remain). Each tab has an
+  **Include** checkbox, its own **Sky** (below), and its **fade keyframes**: rows
+  of tick, clock time and alpha, with a graph of the alpha over the day, "Add at
+  the current time", and "Template's" to restore the template layer's. The base
+  tab has none. A tab with no sky of its own shows the template's texture, or the
+  default sky (the starter's guide atlases).
+- **Sky** (per tab): file picker plus drag-and-drop, with a type dropdown: **Auto (by
   shape)** (the default), **Atlas** or **Panorama**. An atlas must be 3:2. A
   panorama must be 2:1 equirectangular; it is converted to an atlas in the browser
   with exactly `reference/sky_convert.py`'s convention (left edge = south-west),
@@ -337,8 +366,8 @@ then ×1.15 or ×1.5. In the file, `k` values are given unrounded; use them as-i
   message. Default to `reference/samples/placeholder_atlas.png`.
 - **Hero image:** file picker plus drag-and-drop. Read its width and height
   automatically, with manual override fields. Respect alpha.
-- **Reset:** one button puts back the sample sky, the test card and every hero
-  setting, after a confirmation (PLAN §13.8).
+- **Reset:** one button puts back the starter's sky tabs, the test card and every
+  hero setting, after a confirmation (PLAN §13.8, §17.9).
 - Everything runs locally in the browser. Use object URLs; never upload anything.
 
 ### Controls
@@ -351,10 +380,11 @@ Each slider has a linked number box, and the two stay in sync.
 | Bottom elevation b | −30° to 60° | 3° | |
 | Compass ψ (mapping Y) | −180° to 180° | 0° | Raw mapping Y; positive = toward west |
 | Mode | tilted / wall | tilted | Wall mode ships in M3 |
-| Time of day | 0–23 999 ticks | 6000 (noon) | **Preview only.** Shows clock time and θ. Play/pause. At noon θ = 0, so the hero sits exactly where the sliders say |
+| Time of day | 0–23 999 ticks | 6000 (noon) | **Preview only.** Shows clock time, θ and each sky layer's alpha. Play/pause. At noon θ = 0, so the hero sits exactly where the sliders say |
+| Show | all included tabs blended by time / this tab only | blended | **Preview only** (PLAN §17.5) |
 | Camera FOV | 30–110 | 70 | Minecraft's default is 70 |
 | Texture path | text | `sasheen:textures/sky/hero.png` | |
-| Layer | integer | 3 | |
+| Layer | read-out | 3 | Set by the sky tabs: $m + 1$ (§2) |
 
 ### Readouts
 $a$, $k$, $ak$, angular height and width, top and bottom elevations, distance
@@ -362,10 +392,11 @@ to each constraint limit, and warnings when a §6.1 constraint is broken.
 
 ### Outputs
 - A live JSON panel, with Copy and Download (`sky3_image.json`).
+- Per sky tab: Copy and Download of its layer file, as the pack would get it.
 - Download for `hero.png.mcmeta`.
-- **Assemble pack** (PLAN §16): a resource pack zip built from a template (uploaded, or the bundled starter),
-  with the current hero, its `.mcmeta`, this JSON, and the current sky as the day layer (or night, both or
-  neither).
+- **Assemble pack** (PLAN §16, §17.8): a resource pack zip built from a template (uploaded, or the bundled
+  starter), with the current hero, its `.mcmeta`, this JSON, and each included sky tab's layer file and sky.
+  Template sky layers whose tabs aren't included are left out.
 - Import: paste or load an existing `sky3_image.json` and recover the slider
   values (§6.3).
 
@@ -403,9 +434,11 @@ to each constraint limit, and warnings when a §6.1 constraint is broken.
   y rotation is $+\theta(T)$ from §4.7. The world transform is then
   $\text{Spin} \cdot M \cdot \mathbf{v}$, matching §4.5.
 - **Optional:** a toggle overlay that draws face edges and labels.
-- **Stretch:** day and night atlases with a crossfade preview using the day
-  layer's keyframes (4000 → 1, 8000 → 1, 16 000 → 0, 20 000 → 0, linear,
-  wrapping round), with night always on underneath.
+- **Sky layers** (PLAN §17.5): one set of six faces per tab, all in `spinGroup`.
+  The base is drawn opaque; each layer over it is transparent, with
+  `renderOrder` = its place and `opacity` = its fade alpha (§4.9), and hidden
+  at alpha 0. The hero and overlay draw above every sky layer. "This tab only"
+  shows the open tab alone, opaque.
 
 ---
 
@@ -417,15 +450,14 @@ to each constraint limit, and warnings when a §6.1 constraint is broken.
 - Editing the sky atlases themselves.
 - Any server or backend. The tool is a static site.
 
-**Planned:** a menu at the top of the app for separate day and night skies, so an assembled pack can get
-both at once (PLAN §16.6).
+**Done (2026-10-25):** separate day and night skies, and any number more, as sky tabs (PLAN §17).
 
 **Maybe later (back burner):** a heading control for sky *atlases*, like the
 panorama's left edge. It needs atlas → panorama → atlas resampling.
 
-**Stretch goals (after M5):** day/night crossfade preview; several heroes (each
-would be its own layer file, since `mapping` is per layer); remembering the
-last settings in `localStorage`.
+**Stretch goals:** several heroes (each would be its own layer file, since
+`mapping` is per layer, with its own fade keyframes). The crossfade preview and
+remembering settings are done.
 
 ---
 
@@ -487,7 +519,7 @@ Raise these in the plan. Don't guess silently. Status as of 2026-10-11:
 | `samples/starter_pack/` | The starter resource pack for Assemble pack: `pack.mcmeta`, the three layer files, and generated placeholder textures (PLAN §16.7) |
 | `samples/placeholder_pano_2048x1024.png` | The placeholder atlas as a panorama (`sky_convert.py to-pano`), for trying the panorama input |
 | `samples/pano_test_256x128.png`, `pano_test_atlas_f64.png`, `pano_test_atlas_f37.png` | A synthetic panorama and `sky_convert.py to-atlas` output from it at faces 64 and 37: test fixtures for the browser port (PLAN §13.5) |
-| `pack-example/assets/nuit/sky/*.json` | The three working layer files. Note: `sky1`/`sky2` still have the old top-level `"blend"` object, which 26.2 ignores |
+| `pack-example/assets/nuit/sky/*.json` | The three working layer files. Note: `sky1`/`sky2` still have the old top-level `"blend"` object and `fade.alwaysOn`, both of which 26.2 ignores |
 | `pack-example/.../hero.png.mcmeta` | The filtering metadata |
 | `sky_convert.py` | Atlas ↔ panorama converter. Source of the face table in §3 |
 | `place_billboard.py` | Earlier panorama-based method, kept for reference only |
@@ -506,6 +538,9 @@ Base path:
 - `common/src/main/java/me/flashyreese/mods/nuit/components/Properties.java`: property fields and defaults
 - `common/src/main/java/me/flashyreese/mods/nuit/components/Blend.java`: the blend string
 - `common/src/main/java/me/flashyreese/mods/nuit/skybox/textured/SquareTexturedSkybox.java`: face orientation for the sky layers
+- `common/src/main/java/me/flashyreese/mods/nuit/components/Fade.java`: the fade fields (§4.9)
+- `common/src/main/java/me/flashyreese/mods/nuit/skybox/AbstractSkybox.java`: a layer's alpha (§4.9)
+- `common/src/main/java/me/flashyreese/mods/nuit/SkyboxManager.java`: layer order and skipping (§4.9)
 
 ### Vanilla 26.2 data
 
@@ -548,3 +583,11 @@ After each one, stop and report what was done and exactly how to check it.
   export → import → identical JSON).
 - **M5, Polish** (built as PLAN §15; files are remembered too, in IndexedDB). Drag-and-drop, `localStorage`, a `vite build` that works on
   GitHub Pages, and a README with screenshots.
+- **Sky tabs** (added 2026-10-25, PLAN §17). Tabs for any number of sky layers,
+  fade keyframes, Include, the blended preview, per-tab export, and Assemble
+  pack from the tabs. Checks: with the starter's tabs, the Day alpha is 0.5, 1,
+  0.5 and 0 at 6 AM, noon, 6 PM and midnight, in the preview and the readout;
+  excluding Night makes Day the always-on base, and the pack leaves out
+  `sky1_night.json`; a new tab becomes a new layer file with its own texture; a
+  reload brings back the tabs and their skies; a v1 session's sky becomes the
+  Day tab's.
