@@ -1,4 +1,5 @@
-// The last sky file and hero image, kept in the browser's IndexedDB so a reload brings them back (PLAN §15.2).
+// The sky tabs' files, the hero image and the pack template, kept in the browser's IndexedDB so a reload brings
+// them back (PLAN §15.2, §17.9).
 // IndexedDB is a local database with room for large files; nothing here leaves the browser.
 // Its API reports results through callbacks, so each call is wrapped in a Promise. Every function fails
 // quietly (resolving to null or doing nothing) if storage is blocked, as in a private window.
@@ -6,8 +7,11 @@
 const DB_NAME = 'sky-builder';
 const STORE = 'images';
 
-/** The last sky file, hero image and pack template (PLAN §16) the user picked. */
-export type ImageSlot = 'sky' | 'hero' | 'pack';
+/**
+ * The hero image, the pack template (PLAN §16), and each sky tab's own sky, "sky:<tab id>" (PLAN §17.9).
+ * "sky" is the single sky from before sky tabs; it is read once, to move it to the Day tab.
+ */
+export type ImageSlot = 'hero' | 'pack' | 'sky' | `sky:${string}`;
 
 export interface StoredImage {
   name: string;

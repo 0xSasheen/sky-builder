@@ -134,9 +134,6 @@ export interface SkyTab {
 /** What the preview shows (PLAN §17.5). */
 export type PreviewMode = 'blend' | 'tab';
 
-/** Which sky layer(s) of a pack template the current sky replaces (PLAN §16). Day by default. */
-export type SkyTarget = 'day' | 'night' | 'both' | 'none';
-
 /** What a sky file is. 'auto' (the upload default) decides from the shape: 3:2 is an atlas, 2:1 a panorama. */
 export type SkyKind = 'atlas' | 'panorama';
 export type SkyType = 'auto' | SkyKind;

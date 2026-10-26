@@ -2,10 +2,13 @@
 // it reports what the user did through the handlers, and main.ts calls show*() with the result.
 
 import {
-  FACE_WARN_LIMIT, K_RANGE, PANO_FACE_RANGE, PANO_LEFT_BEARING_RANGE, PLAY_SPEEDS, RANGES, TIME_MARKS,
+  FACE_WARN_LIMIT, K_RANGE, PANO_FACE_RANGE, PANO_LEFT_BEARING_RANGE, PLAY_SPEEDS, RANGES, TICKS_PER_DAY, TIME_MARKS,
 } from './constants.ts';
-import { heightFromK, kFromHeight, mcFacing, mcYawPitch, noonBearingDeg, quadrantBearing, ticksToClock } from './math.ts';
-import type { HeroMode, HeroParams, Readouts, Sky3Json, SkyTarget, SkyType, ViewState } from './schema.ts';
+import {
+  fadeAlpha, heightFromK, kFromHeight, mcFacing, mcYawPitch, noonBearingDeg, quadrantBearing, ticksToClock,
+} from './math.ts';
+import type { FadeKey, HeroMode, HeroParams, PreviewMode, Readouts, Sky3Json, SkyType, ViewState } from './schema.ts';
+import type { TabNote } from './tabs.ts';
 
 export interface UiHandlers {
   onView(patch: Partial<ViewState>): void;
@@ -35,10 +38,53 @@ export interface UiHandlers {
   onDropFiles(files: File[], target: DropTarget): void;
   /** A pack template (.zip) chosen in the Resource pack section (PLAN §16). */
   onPackFile(file: File): void;
-  onPackSky(target: SkyTarget): void;
   onAssemble(): void;
   /** Back to the bundled starter template. */
   onUseStarter(): void;
+  // --- Sky tabs (PLAN §17.7). Everything a tab does acts on the open tab.
+  onTabSelect(tabId: string): void;
+  onTabAdd(): void;
+  /** Called while typing; main.ts renames the tab only if the name is usable. */
+  onTabRename(name: string): void;
+  onTabInclude(include: boolean): void;
+  /** Moves the tab at one place in the strip to another (dragging, or the Move buttons). */
+  onTabMove(fromIndex: number, toIndex: number): void;
+  onTabDelete(): void;
+  /** Forget the open tab's own sky, so it shows the template's (or the default). */
+  onSkyReset(): void;
+  /** The whole list of keyframes after an edit, in row order. */
+  onKeyFrames(keys: FadeKey[]): void;
+  onKeyFrameAdd(): void;
+  onKeyFramesTemplate(): void;
+  onTabCopy(): void;
+  onTabDownload(): void;
+  onPreviewMode(mode: PreviewMode): void;
+}
+
+/** One button in the tab strip. */
+export interface TabStripItem { id: string; name: string; include: boolean; base: boolean }
+
+/** What the open tab's panel shows (PLAN §17.7). */
+export interface OpenTabView {
+  id: string;
+  name: string;
+  include: boolean;
+  /** Its layer and file, or why it isn't in the pack. */
+  layerText: string;
+  base: boolean;
+  keyFrames: FadeKey[];
+  /** Rows Nuit can't read, by row. */
+  problems: { index: number; message: string }[];
+  hasTemplateKeyFrames: boolean;
+  /** This tab's amber and red notes. */
+  notes: TabNote[];
+  /** The layer file's name for Download, or null when the tab isn't included. */
+  exportName: string | null;
+  /** The "Use the template's sky" button's label, or null to hide it (the tab has no sky of its own). */
+  skyResetLabel: string | null;
+  canDelete: boolean;
+  index: number;
+  count: number;
 }
 
 export type DropTarget = 'sky' | 'hero' | 'import' | 'pack' | 'auto';
@@ -111,6 +157,12 @@ const margin = (m: number, dp: number, limit: string, unit = ''): string => {
   return `${size}${unit} ${m > 0 ? 'inside' : 'over'} the ${limit}${unit} limit`;
 };
 
+/** "06:00" for tick 0, "18:30" for tick 12500. */
+function clockText(ticks: number): string {
+  const { h, m } = ticksToClock(ticks);
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
+
 /** "due north", "N 30.00° W", "S 12.50° E": a bearing as words. */
 function facingText(bearingDeg: number): string {
   const q = quadrantBearing(bearingDeg);
@@ -131,7 +183,6 @@ export class Ui {
   private readonly setTurn: (v: number) => void;
   private readonly setImageW: (v: number) => void;
   private readonly setImageH: (v: number) => void;
-  private readonly setLayer: (v: number) => void;
   private readonly overlay = byId<HTMLInputElement>('overlay');
   private readonly hud = byId<HTMLDivElement>('hud');
   private readonly skyStatus = byId<HTMLParagraphElement>('sky-status');
@@ -141,7 +192,32 @@ export class Ui {
   private readonly leftBearing = byId<HTMLInputElement>('left-bearing');
   private readonly leftBearingNum = byId<HTMLInputElement>('left-bearing-num');
   private readonly fileInputs = ['sky-file', 'hero-file', 'import-file', 'pack-file'].map((id) => byId<HTMLInputElement>(id));
-  private readonly packSky = byId<HTMLSelectElement>('pack-sky');
+  private readonly packSummary = byId<HTMLUListElement>('pack-summary');
+  private readonly heroLayer = byId<HTMLParagraphElement>('hero-layer');
+  private readonly tabStrip = byId<HTMLDivElement>('tab-strip');
+  private readonly tabName = byId<HTMLInputElement>('tab-name');
+  private readonly tabNameProblem = byId<HTMLParagraphElement>('tab-name-problem');
+  private readonly tabInclude = byId<HTMLInputElement>('tab-include');
+  private readonly tabLayer = byId<HTMLParagraphElement>('tab-layer');
+  private readonly skyResetRow = byId<HTMLDivElement>('sky-reset-row');
+  private readonly skyReset = byId<HTMLButtonElement>('sky-reset');
+  private readonly fadeBase = byId<HTMLParagraphElement>('fade-base');
+  private readonly fadeEditor = byId<HTMLDivElement>('fade-editor');
+  private readonly fadeGraph = byId<HTMLElement>('fade-graph');
+  private readonly fadeRows = byId<HTMLTableSectionElement>('fade-rows');
+  private readonly fadeTemplate = byId<HTMLButtonElement>('fade-template');
+  private readonly tabNotes = byId<HTMLUListElement>('tab-notes');
+  private readonly tabCopy = byId<HTMLButtonElement>('tab-copy');
+  private readonly tabDownload = byId<HTMLButtonElement>('tab-download');
+  private readonly tabExportStatus = byId<HTMLParagraphElement>('tab-export-status');
+  private readonly tabLeft = byId<HTMLButtonElement>('tab-left');
+  private readonly tabRight = byId<HTMLButtonElement>('tab-right');
+  private readonly tabDelete = byId<HTMLButtonElement>('tab-delete');
+  private readonly previewMode = byId<HTMLSelectElement>('preview-mode');
+  private readonly previewNote = byId<HTMLParagraphElement>('preview-note');
+  /** The open tab as last shown: its name for the name box, its place for the Move buttons. */
+  private openTab: OpenTabView | null = null;
+  private readonly handlers: UiHandlers;
   private readonly packStatus = byId<HTMLParagraphElement>('pack-status');
   private readonly packStarter = byId<HTMLButtonElement>('pack-starter');
   private readonly packReport = byId<HTMLUListElement>('pack-report');
@@ -169,6 +245,7 @@ export class Ui {
   private exportStatusTimer = 0;
 
   constructor(handlers: UiHandlers) {
+    this.handlers = handlers;
     // --- Preview
     this.setYaw = bindRange(byId('yaw'), byId('yaw-num'), RANGES.yawDeg, 1, (yawDeg) => handlers.onView({ yawDeg }));
     this.setPitch = bindRange(byId('pitch'), byId('pitch-num'), RANGES.pitchDeg, 1, (pitchDeg) => handlers.onView({ pitchDeg }));
@@ -233,7 +310,6 @@ export class Ui {
       const file = packFile.files?.[0];
       if (file) handlers.onPackFile(file);
     });
-    this.packSky.addEventListener('change', () => handlers.onPackSky(this.packSky.value as SkyTarget));
     byId('assemble').addEventListener('click', () => handlers.onAssemble());
     this.packStarter.addEventListener('click', () => handlers.onUseStarter());
 
@@ -282,9 +358,35 @@ export class Ui {
     }
 
     byId('reset').addEventListener('click', () => {
-      if (window.confirm('Reset to the sample sky, the test card and the starting hero settings? '
-        + 'Your current sky, hero image and settings will be replaced.')) handlers.onReset();
+      if (window.confirm('Reset to the starter\'s sky tabs, the test card and the starting hero settings? '
+        + 'Your sky tabs, their skies, the hero image and your settings will be replaced.')) handlers.onReset();
     });
+
+    // --- Sky tabs (PLAN §17.7)
+    this.tabName.addEventListener('input', () => handlers.onTabRename(this.tabName.value));
+    this.tabName.addEventListener('blur', () => {
+      // A name that couldn't be used goes back to the tab's real one.
+      if (this.openTab) this.tabName.value = this.openTab.name;
+      this.showTabNameProblem(null);
+    });
+    this.tabInclude.addEventListener('change', () => handlers.onTabInclude(this.tabInclude.checked));
+    this.skyReset.addEventListener('click', () => handlers.onSkyReset());
+    byId('fade-add').addEventListener('click', () => handlers.onKeyFrameAdd());
+    this.fadeTemplate.addEventListener('click', () => handlers.onKeyFramesTemplate());
+    this.tabCopy.addEventListener('click', () => handlers.onTabCopy());
+    this.tabDownload.addEventListener('click', () => handlers.onTabDownload());
+    this.tabLeft.addEventListener('click', () => {
+      if (this.openTab) handlers.onTabMove(this.openTab.index, this.openTab.index - 1);
+    });
+    this.tabRight.addEventListener('click', () => {
+      if (this.openTab) handlers.onTabMove(this.openTab.index, this.openTab.index + 1);
+    });
+    this.tabDelete.addEventListener('click', () => {
+      if (this.openTab && window.confirm(`Delete the ${this.openTab.name} tab? Its sky and keyframes will be forgotten.`)) {
+        handlers.onTabDelete();
+      }
+    });
+    this.previewMode.addEventListener('change', () => handlers.onPreviewMode(this.previewMode.value as PreviewMode));
     this.setImageW = bindNumber(byId('image-w'), 0, (imageW) => handlers.onHero({ imageW }));
     this.setImageH = bindNumber(byId('image-h'), 0, (imageH) => handlers.onHero({ imageH }));
 
@@ -306,7 +408,6 @@ export class Ui {
 
     // --- Output
     this.texture.addEventListener('input', () => handlers.onHero({ texture: this.texture.value }));
-    this.setLayer = bindNumber(byId('layer'), 0, (layer) => handlers.onHero({ layer }));
   }
 
   showView(view: ViewState): void {
@@ -337,7 +438,6 @@ export class Ui {
     this.setTurn(hero.mappingYDeg);
     this.setImageW(hero.imageW);
     this.setImageH(hero.imageH);
-    this.setLayer(hero.layer);
     if (document.activeElement !== this.texture) this.texture.value = hero.texture;
     this.textureProblem.textContent = textureProblem ?? '';
 
@@ -378,12 +478,220 @@ export class Ui {
     this.jsonOut.textContent = jsonText;
   }
 
-  /** The line under the time slider: clock, the spin θ, and where the hero faces at this time. */
-  showTime(ticks: number, thetaDeg: number, heroBearingDeg: number): void {
-    const { h, m } = ticksToClock(ticks);
-    const clock = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
-    this.timeReadout.textContent =
-      `${clock} (tick ${Math.round(ticks)}) · θ ${fixed(thetaDeg, 1)}° · the hero faces ${facingText(heroBearingDeg)}`;
+  /**
+   * The line under the time slider: clock, the spin θ, each sky layer's alpha (PLAN §17.5), and where the hero
+   * faces at this time.
+   */
+  showTime(ticks: number, thetaDeg: number, heroBearingDeg: number, layers: readonly { name: string; alpha: number }[]): void {
+    const alphas = layers.map((l) => ` · ${l.name} ${fixed(l.alpha, 2)}`).join('');
+    this.timeReadout.textContent = `${clockText(ticks)} (tick ${Math.round(ticks)}) · θ ${fixed(thetaDeg, 1)}°${alphas}`
+      + ` · the hero faces ${facingText(heroBearingDeg)}`;
+  }
+
+  // --- Sky tabs (PLAN §17.7) ------------------------------------------------------------------
+
+  /** The tab strip and the open tab's panel. */
+  showTabs(items: readonly TabStripItem[], open: OpenTabView): void {
+    this.openTab = open;
+    this.tabStrip.replaceChildren(...items.map((item, index) => this.tabButton(item, index, item.id === open.id)), this.addButton());
+
+    if (document.activeElement !== this.tabName) this.tabName.value = open.name;
+    this.tabInclude.checked = open.include;
+    this.tabLayer.textContent = open.layerText;
+    this.skyResetRow.hidden = open.skyResetLabel === null;
+    this.skyReset.textContent = open.skyResetLabel ?? '';
+
+    this.fadeBase.hidden = !open.base;
+    this.fadeEditor.hidden = open.base;
+    this.fadeTemplate.hidden = !open.hasTemplateKeyFrames;
+    this.fadeRows.replaceChildren(...open.keyFrames.map((key, index) =>
+      this.keyRow(key, index, open.problems.some((p) => p.index === index))));
+    this.showList(this.tabNotes, open.notes.map((n) => ({ level: n.level, text: n.text })));
+
+    this.tabCopy.disabled = this.tabDownload.disabled = open.exportName === null;
+    this.tabDownload.textContent = open.exportName ? `Download ${open.exportName}` : 'Download';
+    const notIncluded = 'Include this tab to export its layer file.';
+    if (open.exportName === null) this.showTabExportStatus(notIncluded);
+    else if (this.tabExportStatus.textContent === notIncluded) this.showTabExportStatus('');
+    this.tabLeft.disabled = open.index === 0;
+    this.tabRight.disabled = open.index === open.count - 1;
+    this.tabDelete.disabled = !open.canDelete;
+  }
+
+  private tabButton(item: TabStripItem, index: number, selected: boolean): HTMLButtonElement {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.setAttribute('role', 'tab');
+    button.setAttribute('aria-selected', String(selected));
+    button.classList.toggle('excluded', !item.include);
+    button.title = item.include ? (item.base ? 'The base layer: always on' : 'Fades over the layers before it') : 'Not included in the pack';
+    const name = document.createElement('span');
+    name.textContent = item.name;
+    button.append(name);
+    if (item.base) {
+      const tag = document.createElement('span');
+      tag.className = 'tag';
+      tag.textContent = 'base';
+      button.append(tag);
+    }
+    button.addEventListener('click', () => this.handlers.onTabSelect(item.id));
+
+    // Dragging a tab onto another moves it there. These drags carry no files, so the page's file drop ignores them.
+    const TAB_DRAG = 'application/x-sky-builder-tab';
+    button.draggable = true;
+    button.addEventListener('dragstart', (e) => {
+      e.dataTransfer?.setData(TAB_DRAG, String(index));
+      if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
+    });
+    button.addEventListener('dragover', (e) => {
+      if (!e.dataTransfer?.types.includes(TAB_DRAG)) return;
+      e.preventDefault();
+      button.classList.add('drag-over');
+    });
+    button.addEventListener('dragleave', () => button.classList.remove('drag-over'));
+    button.addEventListener('drop', (e) => {
+      if (!e.dataTransfer?.types.includes(TAB_DRAG)) return;
+      e.preventDefault();
+      button.classList.remove('drag-over');
+      const from = Number(e.dataTransfer.getData(TAB_DRAG));
+      if (Number.isInteger(from) && from !== index) this.handlers.onTabMove(from, index);
+    });
+    return button;
+  }
+
+  private addButton(): HTMLButtonElement {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'add';
+    button.textContent = '+';
+    button.title = 'Add a sky tab';
+    button.setAttribute('aria-label', 'Add a sky tab');
+    button.addEventListener('click', () => this.handlers.onTabAdd());
+    return button;
+  }
+
+  /** One keyframe row. An edit is committed (Enter, or leaving the box) as the whole list, in row order. */
+  private keyRow(key: FadeKey, index: number, bad: boolean): HTMLTableRowElement {
+    const row = document.createElement('tr');
+    row.classList.toggle('error', bad);
+    const tick = document.createElement('input');
+    tick.type = 'number';
+    tick.step = '1';
+    tick.min = '0';
+    tick.max = String(RANGES.timeTicks.max);
+    tick.value = String(key.tick);
+    tick.setAttribute('aria-label', `Keyframe ${index + 1} tick`);
+    const alpha = document.createElement('input');
+    alpha.type = 'number';
+    alpha.step = '0.05';
+    alpha.min = '0';
+    alpha.max = '1';
+    alpha.value = String(key.alpha);
+    alpha.setAttribute('aria-label', `Keyframe ${index + 1} alpha`);
+    const clock = document.createElement('td');
+    clock.className = 'clock';
+    clock.textContent = Number.isFinite(key.tick) ? clockText(key.tick) : '';
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.textContent = '×';
+    remove.setAttribute('aria-label', `Delete keyframe ${index + 1}`);
+
+    const commit = (): void => {
+      const keys = this.readKeyRows();
+      if (keys) this.handlers.onKeyFrames(keys);
+    };
+    tick.addEventListener('change', commit);
+    alpha.addEventListener('change', commit);
+    remove.addEventListener('click', () => {
+      const keys = this.readKeyRows();
+      if (keys) this.handlers.onKeyFrames(keys.filter((_, i) => i !== index));
+    });
+
+    const cell = (child: HTMLElement): HTMLTableCellElement => {
+      const td = document.createElement('td');
+      td.append(child);
+      return td;
+    };
+    row.append(cell(tick), clock, cell(alpha), cell(remove));
+    return row;
+  }
+
+  /** The keyframe rows as typed, or null if a box doesn't hold a number. */
+  private readKeyRows(): FadeKey[] | null {
+    const keys: FadeKey[] = [];
+    for (const row of this.fadeRows.rows) {
+      const [tick, alpha] = [...row.querySelectorAll('input')].map((input) => input.valueAsNumber);
+      if (!Number.isFinite(tick) || !Number.isFinite(alpha)) return null;
+      keys.push({ tick, alpha });
+    }
+    return keys;
+  }
+
+  /**
+   * The open tab's alpha over the day, from tick 0 (6 AM) on the left, with dots at its keyframes and a line at
+   * the preview time. Null hides it (the base, which is always on).
+   */
+  showFadeGraph(keys: readonly FadeKey[] | null, ticks: number): void {
+    if (keys === null) {
+      this.fadeGraph.replaceChildren();
+      return;
+    }
+    const W = 240;
+    const H = 64;
+    const x = (t: number): number => (t / TICKS_PER_DAY) * W;
+    const y = (a: number): number => H - 4 - a * (H - 8);
+    const svg = (tag: string, attrs: Record<string, string | number>): SVGElement => {
+      const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
+      for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, String(v));
+      return el;
+    };
+    const parts: SVGElement[] = [];
+    for (const t of [6000, 12000, 18000]) parts.push(svg('line', { class: 'grid', x1: x(t), x2: x(t), y1: 0, y2: H }));
+    const points: string[] = [];
+    for (let t = 0; t <= TICKS_PER_DAY; t += 100) points.push(`${x(t).toFixed(1)},${y(fadeAlpha(keys, t)).toFixed(1)}`);
+    parts.push(svg('polyline', { class: 'curve', points: points.join(' ') }));
+    for (const k of keys) {
+      if (Number.isFinite(k.tick) && k.tick >= 0 && k.tick < TICKS_PER_DAY) {
+        parts.push(svg('circle', { class: 'key', cx: x(k.tick), cy: y(Math.min(1, Math.max(0, k.alpha))), r: 2.5 }));
+      }
+    }
+    parts.push(svg('line', { class: 'now', x1: x(ticks), x2: x(ticks), y1: 0, y2: H }));
+    this.fadeGraph.replaceChildren(...parts);
+  }
+
+  /** Why the name being typed can't be used; null clears it. */
+  showTabNameProblem(problem: string | null): void {
+    this.tabNameProblem.textContent = problem ?? '';
+  }
+
+  showTabExportStatus(text: string, isError = false): void {
+    this.tabExportStatus.textContent = text;
+    this.tabExportStatus.classList.toggle('error', isError);
+  }
+
+  /** The Show dropdown, and a note when what it shows needs explaining. */
+  showPreviewMode(mode: PreviewMode, note: string): void {
+    this.previewMode.value = mode;
+    this.previewNote.textContent = note;
+  }
+
+  /** The hero's layer, now set by the included tabs (decision 17.3.3). */
+  showHeroLayer(text: string): void {
+    this.heroLayer.textContent = text;
+  }
+
+  /** What Assemble pack will put in, and anything to look at first. */
+  showPackSummary(lines: readonly ImportLine[]): void {
+    this.showList(this.packSummary, lines);
+  }
+
+  private showList(list: HTMLUListElement, lines: readonly ImportLine[]): void {
+    list.replaceChildren(...lines.map(({ level, text }) => {
+      const li = document.createElement('li');
+      li.className = level;
+      li.textContent = text;
+      return li;
+    }));
   }
 
   /** Asks before exporting a JSON with problems (PLAN §14.2). True means go ahead. */
@@ -431,10 +739,6 @@ export class Ui {
     this.packStarter.hidden = !uploaded;
   }
 
-  showPackSky(target: SkyTarget): void {
-    this.packSky.value = target;
-  }
-
   /** The outcome of the last Assemble pack: what went in, and anything worth knowing. */
   showPackReport(lines: readonly ImportLine[]): void {
     this.packReport.replaceChildren(...lines.map(({ level, text }) => {
@@ -469,9 +773,14 @@ export class Ui {
     this.skyType.value = type;
   }
 
-  /** Empties both file pickers, so they don't name a file that is no longer shown. */
+  /** Empties the file pickers, so they don't name a file that is no longer shown. */
   clearFileInputs(): void {
     for (const input of this.fileInputs) input.value = '';
+  }
+
+  /** Empties the sky file picker, for a newly opened tab. */
+  clearSkyInput(): void {
+    this.fileInputs[0].value = '';
   }
 
   showAtlasDownload(visible: boolean): void {

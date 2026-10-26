@@ -17,43 +17,95 @@
       <aside class="panel">
         <div class="title-row">
           <h1>Sky Builder</h1>
-          <button type="button" id="reset" title="Back to the sample atlas, the test card and the starting hero settings">Reset sky and hero</button>
+          <button type="button" id="reset" title="Back to the starter's sky tabs, the test card and the starting hero settings">Reset sky tabs and hero</button>
         </div>
+
+        <section class="sky-tabs">
+          <h2>Sky tabs</h2>
+          <p class="hint">
+            One tab per sky layer. The first included tab is the base, always on; each tab after it fades in over
+            the ones before by its keyframes. Drag a tab to reorder it.
+          </p>
+          <div class="tab-strip" role="tablist" aria-label="Sky tabs" id="tab-strip"></div>
+          <div class="tab-panel" role="tabpanel" id="tab-panel">
+            <div class="field pick">
+              <label for="tab-name">Name</label>
+              <input type="text" id="tab-name" spellcheck="false" autocomplete="off" maxlength="40" />
+            </div>
+            <p class="status error" id="tab-name-problem" role="status"></p>
+            <label class="check">
+              <input type="checkbox" id="tab-include" />
+              <span>Include in the pack</span>
+            </label>
+            <p class="hint tab-layer" id="tab-layer"></p>
+
+            <div class="field" data-drop="sky">
+              <label for="sky-file">Sky</label>
+              <div class="sky-row">
+                <select id="sky-type" aria-label="Sky file type">
+                  <option value="auto">Auto (by shape)</option>
+                  <option value="atlas">Atlas (3:2)</option>
+                  <option value="panorama">Panorama (2:1)</option>
+                </select>
+                <input type="file" id="sky-file" accept="image/png,image/*" />
+              </div>
+            </div>
+            <p class="status" id="sky-status" role="status"></p>
+            <div class="buttons" id="sky-reset-row" hidden>
+              <button type="button" id="sky-reset">Use the template's sky</button>
+            </div>
+            <div id="pano-options" hidden>
+              <div class="field range">
+                <label for="face-size">Face size</label>
+                <span class="hint">px per cube face; the atlas is 3 × 2 faces</span>
+                <input type="number" id="face-size" step="1" aria-label="Face size in pixels" />
+              </div>
+              <div class="field range">
+                <label for="left-bearing">Left edge</label>
+                <input type="range" id="left-bearing" step="1" />
+                <input type="number" id="left-bearing-num" step="0.1" aria-label="Bearing of the panorama's left edge in degrees" />
+              </div>
+              <p class="hint">
+                The compass bearing the panorama's left edge faces. sky_convert.py uses −135 (south-west);
+                other tools often put north in the middle, which is −180. Drag to line the sky up by eye.
+              </p>
+            </div>
+            <div class="buttons" id="pano-download" hidden>
+              <button type="button" id="download-atlas">Download atlas (PNG)</button>
+            </div>
+
+            <h3>Fade</h3>
+            <p class="hint" id="fade-base" hidden>Base layer: always on, so it has no keyframes.</p>
+            <div id="fade-editor">
+              <svg class="fade-graph" id="fade-graph" viewBox="0 0 240 64" preserveAspectRatio="none" role="img"
+                aria-label="This layer's alpha over the day, from 6 AM"></svg>
+              <table class="keys">
+                <thead><tr><th>Tick</th><th>Clock</th><th>Alpha</th><th><span class="visually-hidden">Delete</span></th></tr></thead>
+                <tbody id="fade-rows"></tbody>
+              </table>
+              <div class="buttons">
+                <button type="button" id="fade-add">Add at the current time</button>
+                <button type="button" id="fade-template" title="Put back the template layer's keyframes">Template's</button>
+              </div>
+            </div>
+            <ul class="warnings" id="tab-notes" aria-live="polite"></ul>
+
+            <div class="buttons">
+              <button type="button" id="tab-copy">Copy layer JSON</button>
+              <button type="button" id="tab-download">Download</button>
+            </div>
+            <p class="status" id="tab-export-status" role="status"></p>
+            <div class="buttons">
+              <button type="button" id="tab-left" aria-label="Move this tab left">◀ Move</button>
+              <button type="button" id="tab-right" aria-label="Move this tab right">Move ▶</button>
+              <button type="button" id="tab-delete">Delete tab</button>
+            </div>
+          </div>
+        </section>
 
         <section>
           <h2>Files</h2>
-          <p class="hint">Choose files, or drop them on a row or anywhere on the page.</p>
-          <div class="field" data-drop="sky">
-            <label for="sky-file">Sky</label>
-            <div class="sky-row">
-              <select id="sky-type" aria-label="Sky file type">
-                <option value="auto">Auto (by shape)</option>
-                <option value="atlas">Atlas (3:2)</option>
-                <option value="panorama">Panorama (2:1)</option>
-              </select>
-              <input type="file" id="sky-file" accept="image/png,image/*" />
-            </div>
-          </div>
-          <p class="status" id="sky-status" role="status"></p>
-          <div id="pano-options" hidden>
-            <div class="field range">
-              <label for="face-size">Face size</label>
-              <span class="hint">px per cube face; the atlas is 3 × 2 faces</span>
-              <input type="number" id="face-size" step="1" aria-label="Face size in pixels" />
-            </div>
-            <div class="field range">
-              <label for="left-bearing">Left edge</label>
-              <input type="range" id="left-bearing" step="1" />
-              <input type="number" id="left-bearing-num" step="0.1" aria-label="Bearing of the panorama's left edge in degrees" />
-            </div>
-            <p class="hint">
-              The compass bearing the panorama's left edge faces. sky_convert.py uses −135 (south-west);
-              other tools often put north in the middle, which is −180. Drag to line the sky up by eye.
-            </p>
-          </div>
-          <div class="buttons" id="pano-download" hidden>
-            <button type="button" id="download-atlas">Download atlas (PNG)</button>
-          </div>
+          <p class="hint">Choose files, or drop them on a row or anywhere on the page. A sky image goes to the open tab.</p>
           <label class="field" data-drop="hero">
             <span>Hero image</span>
             <input type="file" id="hero-file" accept="image/png,image/*" />
@@ -143,6 +195,14 @@
             <button type="button" id="look-hero">Look at hero</button>
             <button type="button" id="look-north">Look north at the horizon</button>
           </div>
+          <div class="field pick">
+            <label for="preview-mode">Show</label>
+            <select id="preview-mode">
+              <option value="blend">All included tabs, blended by time</option>
+              <option value="tab">This tab only</option>
+            </select>
+          </div>
+          <p class="hint" id="preview-note"></p>
           <label class="check">
             <input type="checkbox" id="overlay" />
             <span>Overlay: cube edges and face table (magenta), horizon and compass (cyan)</span>
@@ -156,11 +216,7 @@
             <input type="text" id="texture" spellcheck="false" autocomplete="off" />
           </label>
           <p class="status error" id="texture-problem" role="status"></p>
-          <div class="field range">
-            <label for="layer">Layer</label>
-            <span class="hint">draw order; the sky layers are 1 and 2</span>
-            <input type="number" id="layer" step="1" />
-          </div>
+          <p class="hint" id="hero-layer"></p>
         </section>
 
         <section>
@@ -188,23 +244,15 @@
         <section>
           <h2>Resource pack</h2>
           <p class="hint">
-            Builds a pack from a template: the current sky, the hero, its .mcmeta and this JSON go in, and the rest of
-            the template is copied as it is.
+            Builds a pack from a template: each included sky tab's layer and sky, the hero, its .mcmeta and this JSON
+            go in. Layers of tabs that aren't included are left out; the rest of the template is copied as it is.
           </p>
           <div class="field" data-drop="pack">
             <label for="pack-file">Template (.zip)</label>
             <input type="file" id="pack-file" accept=".zip,application/zip" />
           </div>
           <p class="status" id="pack-status" role="status"></p>
-          <div class="field pick">
-            <label for="pack-sky">Sky goes to</label>
-            <select id="pack-sky">
-              <option value="day">Day layer</option>
-              <option value="night">Night layer</option>
-              <option value="both">Both layers</option>
-              <option value="none">Neither (keep the template's)</option>
-            </select>
-          </div>
+          <ul class="warnings" id="pack-summary" aria-live="polite"></ul>
           <div class="buttons">
             <button type="button" id="assemble">Assemble pack (.zip)</button>
             <button type="button" id="pack-starter" hidden>Use the starter template</button>

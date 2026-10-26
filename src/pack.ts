@@ -4,7 +4,7 @@
 import { unzipSync, zipSync, type Zippable } from 'fflate';
 import { FIXED_JSON } from './constants.ts';
 import { HERO_MCMETA, textureProblem } from './json.ts';
-import type { FadeKey, SkyTab, SkyTarget } from './schema.ts';
+import type { FadeKey, SkyTab } from './schema.ts';
 import { layerOutputs, tabNotes, textureIdFromPath } from './tabs.ts';
 
 /** A pack's files: path inside the zip → bytes. */
@@ -139,61 +139,9 @@ export function readTemplate(files: PackFiles): TemplateInfo {
   };
 }
 
-export interface PackInputs {
-  /** The exact sky3_image.json bytes the tool would export (serializeSky3). */
-  jsonText: string;
-  /** The hero's texture name from the JSON, e.g. "sasheen:textures/sky/hero.png". */
-  texture: string;
-  /** The hero image as PNG bytes. */
-  heroPng: Uint8Array;
-  /** The current sky atlas as PNG bytes, and its width (Nuit's atlases stay within 8192 px). */
-  skyPng: Uint8Array | null;
-  skyWidth: number;
-  skyTarget: SkyTarget;
-}
-
 export type PackResult =
   | { ok: true; files: PackFiles; warnings: string[] }
   | { ok: false; problems: string[] };
-
-/**
- * The new pack: the template with the hero layer's JSON, the hero image and its .mcmeta, and the sky texture(s)
- * replaced or added. Everything else is copied unchanged.
- */
-export function assemblePack(template: PackFiles, inputs: PackInputs): PackResult {
-  const info = readTemplate(template);
-  const problems = [...info.problems];
-  const heroPath = texturePath(inputs.texture);
-  if (heroPath === null) problems.push(`The texture "${inputs.texture}" can't be placed in a pack: ${textureProblem(inputs.texture)}`);
-  if (problems.length > 0) return { ok: false, problems };
-
-  const warnings = [...info.warnings];
-  const files: PackFiles = new Map(template);
-  files.set(info.heroLayerFile, encoder.encode(inputs.jsonText));
-  files.set(heroPath!, inputs.heroPng);
-  files.set(`${heroPath}.mcmeta`, encoder.encode(HERO_MCMETA));
-  if (info.oldHeroTexturePath && info.oldHeroTexturePath !== heroPath && template.has(info.oldHeroTexturePath)) {
-    warnings.push(`The template's hero texture ${info.oldHeroTexturePath} is no longer used, and was left in the pack.`);
-  }
-
-  if (inputs.skyTarget !== 'none') {
-    const targets = info.skyLayers.filter((l) => inputs.skyTarget === 'both' || l.role === inputs.skyTarget);
-    if (!inputs.skyPng) {
-      warnings.push('No sky is loaded, so the template\'s sky textures were kept.');
-    } else if (targets.length === 0) {
-      warnings.push(`The template has no ${inputs.skyTarget} sky layer, so the sky was not added.`);
-    } else {
-      for (const layer of targets) {
-        if (layer.texturePath) files.set(layer.texturePath, inputs.skyPng);
-        else warnings.push(`${layer.file} names no usable texture, so the sky was not added to it.`);
-      }
-      if (inputs.skyWidth > 8192) {
-        warnings.push(`The sky atlas is ${inputs.skyWidth} px wide; Nuit packs usually stay within 8192 px, the limit of many GPUs.`);
-      }
-    }
-  }
-  return { ok: true, files, warnings };
-}
 
 export interface TabPackInputs {
   /** The exact sky3_image.json bytes the tool would export (serializeSky3), with the hero's layer from layerPlan. */

@@ -8,7 +8,7 @@ import sky3Text from '../reference/pack-example/assets/nuit/sky/sky3_image.json?
 import starterDayText from '../reference/samples/starter_pack/assets/nuit/sky/sky2_day.json?raw';
 import { buildSky3, HERO_MCMETA, serializeSky3 } from '../src/json.ts';
 import {
-  assemblePack, assembleTabs, isPng, isZipFile, readTemplate, readZip, texturePath, writeZip, type PackFiles, type PackInputs,
+  assembleTabs, isPng, isZipFile, readTemplate, readZip, texturePath, writeZip, type PackFiles,
 } from '../src/pack.ts';
 import type { SkyTab } from '../src/schema.ts';
 import { mergeTemplate, newTab } from '../src/tabs.ts';
@@ -30,20 +30,6 @@ function template(): PackFiles {
     ['assets/sasheen/textures/sky/hero.png', bytes(3)],
     ['assets/sasheen/textures/sky/hero.png.mcmeta', enc(HERO_MCMETA)],
   ]);
-}
-
-function inputs(overrides: Partial<PackInputs> = {}): PackInputs {
-  const json = buildSky3(params(cases[2], { mappingYDeg: 30 }));
-  return {
-    jsonText: serializeSky3(json), texture: json.animatableTextures[0].texture,
-    heroPng: bytes(30), skyPng: bytes(20), skyWidth: 1536, skyTarget: 'day', ...overrides,
-  };
-}
-
-function assembled(overrides: Partial<PackInputs> = {}): { files: PackFiles; warnings: string[] } {
-  const result = assemblePack(template(), inputs(overrides));
-  if (!result.ok) throw new Error(`expected ok, got: ${result.problems.join(' | ')}`);
-  return result;
 }
 
 describe('reading a template (PLAN §16.1)', () => {
@@ -92,54 +78,7 @@ describe('reading a template (PLAN §16.1)', () => {
   });
 });
 
-describe('assembling (PLAN §16.2)', () => {
-  it('puts in the exported JSON, the hero, its .mcmeta, and the sky as the day texture', () => {
-    const { files } = assembled();
-    expect(dec(files.get('assets/nuit/sky/sky3_image.json'))).toBe(inputs().jsonText);
-    expect(files.get('assets/sasheen/textures/sky/hero.png')).toEqual(bytes(30));
-    expect(dec(files.get('assets/sasheen/textures/sky/hero.png.mcmeta'))).toBe(HERO_MCMETA);
-    expect(files.get('assets/sasheen/textures/sky/day.png')).toEqual(bytes(20));
-    expect(files.get('assets/sasheen/textures/sky/night.png')).toEqual(bytes(1)); // kept
-    expect(dec(files.get('pack.mcmeta'))).toContain('pack_format');
-    expect(dec(files.get('assets/nuit/sky/sky1_night.json'))).toBe(sky1Text); // copied unchanged
-  });
-
-  it('can put the sky on the night layer, both, or neither', () => {
-    expect(assembled({ skyTarget: 'night' }).files.get('assets/sasheen/textures/sky/night.png')).toEqual(bytes(20));
-    const both = assembled({ skyTarget: 'both' }).files;
-    expect([both.get('assets/sasheen/textures/sky/night.png'), both.get('assets/sasheen/textures/sky/day.png')])
-      .toEqual([bytes(20), bytes(20)]);
-    const none = assembled({ skyTarget: 'none' }).files;
-    expect([none.get('assets/sasheen/textures/sky/night.png'), none.get('assets/sasheen/textures/sky/day.png')])
-      .toEqual([bytes(1), bytes(2)]);
-  });
-
-  it('a new texture path puts the hero there and notes the unused old one', () => {
-    const json = buildSky3(params(cases[2], { texture: 'mine:textures/sky/girl.png' }));
-    const { files, warnings } = assembled({ jsonText: serializeSky3(json), texture: 'mine:textures/sky/girl.png' });
-    expect(files.get('assets/mine/textures/sky/girl.png')).toEqual(bytes(30));
-    expect(files.has('assets/mine/textures/sky/girl.png.mcmeta')).toBe(true);
-    expect(warnings).toContainEqual(expect.stringContaining('hero.png is no longer used'));
-  });
-
-  it('refuses an unusable texture path or a template that is not a pack', () => {
-    expect(assemblePack(template(), inputs({ texture: 'Hero.png' }))).toEqual({ ok: false, problems: [expect.stringContaining('Hero.png')] });
-    expect(assemblePack(new Map(), inputs()).ok).toBe(false);
-  });
-
-  it('warns about a very wide atlas', () => {
-    expect(assembled({ skyWidth: 12288 }).warnings).toContainEqual(expect.stringContaining('12288 px'));
-  });
-});
-
 describe('zip files', () => {
-  it('round-trips every file byte for byte', () => {
-    const { files } = assembled();
-    const back = readZip(writeZip(files));
-    expect([...back.keys()].sort()).toEqual([...files.keys()].sort());
-    for (const [path, data] of files) expect(back.get(path)).toEqual(data);
-  });
-
   it('a non-zip is an error', () => {
     expect(() => readZip(enc('not a zip'))).toThrow();
   });
@@ -273,7 +212,38 @@ describe('assembling from sky tabs (PLAN §17.8)', () => {
     expect(warnings).toContainEqual(expect.stringContaining('stars.json (nuit:decorations) is layer 2'));
   });
 
-  it('refuses what assemblePack refuses, and round-trips through a zip', () => {
+  it('puts in the exported JSON, the hero and its .mcmeta, and copies the rest unchanged', () => {
+    const { files } = assembleWith(tabsOf(template()));
+    const json = buildSky3(params(cases[2], { layer: 3 }));
+    expect(dec(files.get('assets/nuit/sky/sky3_image.json'))).toBe(serializeSky3(json));
+    expect(files.get('assets/sasheen/textures/sky/hero.png')).toEqual(bytes(30));
+    expect(dec(files.get('assets/sasheen/textures/sky/hero.png.mcmeta'))).toBe(HERO_MCMETA);
+    expect(dec(files.get('pack.mcmeta'))).toContain('pack_format');
+  });
+
+  it('a new hero texture path puts the hero there and notes the unused old one', () => {
+    const json = buildSky3(params(cases[2], { texture: 'mine:textures/sky/girl.png' }));
+    const result = assembleTabs(template(), {
+      jsonText: serializeSky3(json), texture: 'mine:textures/sky/girl.png', heroPng: bytes(30), tabs: tabsOf(template()),
+      skyPngs: new Map(), defaultSky: { base: NIGHT_DEFAULT, other: DAY_DEFAULT }, newLayerText: starterDayText,
+    });
+    if (!result.ok) throw new Error('expected ok');
+    expect(result.files.get('assets/mine/textures/sky/girl.png')).toEqual(bytes(30));
+    expect(result.files.has('assets/mine/textures/sky/girl.png.mcmeta')).toBe(true);
+    expect(result.warnings).toContainEqual(expect.stringContaining('hero.png is no longer used'));
+  });
+
+  it('warns about a very wide atlas', () => {
+    const [night, day] = tabsOf(template());
+    const result = assembleTabs(template(), {
+      jsonText: '{}', texture: 'sasheen:textures/sky/hero.png', heroPng: bytes(30), tabs: [night, withSky(day)],
+      skyPngs: new Map([[day.id, { png: bytes(20), width: 12288 }]]),
+      defaultSky: { base: NIGHT_DEFAULT, other: DAY_DEFAULT }, newLayerText: starterDayText,
+    });
+    expect(result.ok && result.warnings).toContainEqual(expect.stringContaining('12288 px'));
+  });
+
+  it('refuses an unusable texture path or a template that is not a pack, and round-trips through a zip', () => {
     const tabs = tabsOf(template());
     const inputs = {
       jsonText: '', texture: 'Hero.png', heroPng: bytes(30), tabs, skyPngs: new Map(),

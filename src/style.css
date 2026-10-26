@@ -342,3 +342,96 @@ body.dragging [data-drop] {
 body.dragging [data-drop].drop-over {
   outline: 2px solid var(--accent);
 }
+
+/* --- Sky tabs (PLAN §17.7) ----------------------------------------------------------- */
+
+.tab-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 8px 0 0;
+}
+
+.tab-strip button {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.tab-strip button[aria-selected='true'] {
+  border-color: var(--accent);
+  background: var(--bg);
+}
+
+/* A tab that isn't included is dimmed; its name is struck through like a line left out. */
+.tab-strip button.excluded { color: var(--muted); text-decoration: line-through; }
+.tab-strip button.drag-over { outline: 2px solid var(--accent); }
+.tab-strip .tag { font-size: 11px; color: var(--muted); text-decoration: none; }
+.tab-strip .add { padding-inline: 12px; }
+
+.tab-panel {
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 0 4px 4px 4px;
+  background: var(--bg);
+}
+
+.tab-panel input[type='text'],
+.tab-panel input[type='number'],
+.tab-panel select { background: var(--panel); }
+
+.tab-layer { margin: 4px 0 10px; }
+
+h3 {
+  margin: 12px 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.fade-graph {
+  display: block;
+  width: 100%;
+  height: 64px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--panel);
+}
+
+.fade-graph .curve { fill: none; stroke: var(--accent); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.fade-graph .key { fill: var(--accent); }
+.fade-graph .now { stroke: var(--warn); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.fade-graph .grid { stroke: var(--line); stroke-width: 1; vector-effect: non-scaling-stroke; }
+
+.keys {
+  width: 100%;
+  margin-top: 6px;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.keys th {
+  font-size: 11px;
+  font-weight: 600;
+  text-align: left;
+  color: var(--muted);
+}
+
+.keys td { padding: 2px 4px 2px 0; }
+.keys td.clock { color: var(--muted); white-space: nowrap; }
+.keys tr.error input { border-color: var(--error); }
+.keys button { padding: 2px 8px; }
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* A tab's name is ordinary text, not a resource path. */
+#tab-name { font: inherit; }
