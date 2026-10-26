@@ -4,7 +4,8 @@
 import { unzipSync, zipSync, type Zippable } from 'fflate';
 import { FIXED_JSON } from './constants.ts';
 import { HERO_MCMETA, textureProblem } from './json.ts';
-import type { FadeKey, SkyTarget } from './schema.ts';
+import type { FadeKey, SkyTab, SkyTarget } from './schema.ts';
+import { layerOutputs, tabNotes, textureIdFromPath } from './tabs.ts';
 
 /** A pack's files: path inside the zip → bytes. */
 export type PackFiles = Map<string, Uint8Array>;
@@ -30,6 +31,8 @@ export interface TemplateInfo {
   /** The texture the template's hero layer used, if any. */
   oldHeroTexturePath: string | null;
   skyLayers: SkyLayer[];
+  /** Nuit layers that are neither sky nor (the first) hero layer: copied as they are. */
+  otherLayers: { file: string; type: string; layer: number }[];
   /** Reasons the template can't be used at all. */
   problems: string[];
   /** Things worth knowing that don't stop assembly. */
@@ -77,8 +80,9 @@ export function readTemplate(files: PackFiles): TemplateInfo {
   const warnings: string[] = [];
   if (!files.has('pack.mcmeta')) problems.push('The template has no pack.mcmeta, so Minecraft would not list it.');
 
-  const heroLayers: { file: string; texturePath: string | null }[] = [];
+  const heroLayers: { file: string; texturePath: string | null; layer: number }[] = [];
   const skyLayers: SkyLayer[] = [];
+  const otherLayers: TemplateInfo['otherLayers'] = [];
   for (const file of [...files.keys()].filter((p) => NUIT_LAYER.test(p)).sort()) {
     let layer: unknown;
     try {
@@ -89,10 +93,11 @@ export function readTemplate(files: PackFiles): TemplateInfo {
     }
     if (!isObj(layer)) continue;
     const props = isObj(layer.properties) ? layer.properties : {};
+    const layerValue = typeof props.layer === 'number' ? props.layer : 0;
     if (layer.type === 'nuit:multi-textured') {
       const entries = Array.isArray(layer.animatableTextures) ? layer.animatableTextures : [];
       const texture = isObj(entries[0]) && typeof entries[0].texture === 'string' ? entries[0].texture : '';
-      heroLayers.push({ file, texturePath: texturePath(texture) });
+      heroLayers.push({ file, texturePath: texturePath(texture), layer: layerValue });
     } else if (layer.type === 'nuit:square-textured') {
       const texture = typeof layer.texture === 'string' ? layer.texture : '';
       // Nuit 26.2's Fade has no "alwaysOn" field (it is dropped when read): a layer is always on exactly
@@ -103,7 +108,7 @@ export function readTemplate(files: PackFiles): TemplateInfo {
         file,
         texturePath: texturePath(texture),
         role: alwaysOn ? 'night' : 'day',
-        layer: typeof props.layer === 'number' ? props.layer : 0,
+        layer: layerValue,
         keyFrames: readKeyFrames(fade.keyFrames),
         duration: typeof fade.duration === 'number' ? fade.duration : 24000,
       });
@@ -112,8 +117,11 @@ export function readTemplate(files: PackFiles): TemplateInfo {
           + 'would drift against this sky.');
       }
       if ('blend' in layer) {
-        warnings.push(`${file} has a top-level "blend", which Nuit 26.2 ignores; it draws with "normal" blending.`);
+        warnings.push(`${file} has a top-level "blend", which Nuit 26.2 ignores; it draws with "normal" blending. `
+          + 'An assembled pack leaves it out.');
       }
+    } else {
+      otherLayers.push({ file, type: typeof layer.type === 'string' ? layer.type : '(no type)', layer: layerValue });
     }
   }
   if (heroLayers.length + skyLayers.length === 0) problems.push('The template has no Nuit layers in assets/nuit/sky/.');
@@ -125,6 +133,7 @@ export function readTemplate(files: PackFiles): TemplateInfo {
     heroLayerFile: heroLayers[0]?.file ?? DEFAULT_HERO_LAYER,
     oldHeroTexturePath: heroLayers[0]?.texturePath ?? null,
     skyLayers,
+    otherLayers: [...otherLayers, ...heroLayers.slice(1).map((h) => ({ file: h.file, type: 'nuit:multi-textured', layer: h.layer }))],
     problems,
     warnings,
   };
@@ -182,6 +191,90 @@ export function assemblePack(template: PackFiles, inputs: PackInputs): PackResul
         warnings.push(`The sky atlas is ${inputs.skyWidth} px wide; Nuit packs usually stay within 8192 px, the limit of many GPUs.`);
       }
     }
+  }
+  return { ok: true, files, warnings };
+}
+
+export interface TabPackInputs {
+  /** The exact sky3_image.json bytes the tool would export (serializeSky3), with the hero's layer from layerPlan. */
+  jsonText: string;
+  /** The hero's texture name from the JSON, e.g. "sasheen:textures/sky/hero.png". */
+  texture: string;
+  /** The hero image as PNG bytes. */
+  heroPng: Uint8Array;
+  tabs: readonly SkyTab[];
+  /** Each tab's own sky as PNG bytes, by tab id, with its width (Nuit's atlases stay within 8192 px). */
+  skyPngs: ReadonlyMap<string, { png: Uint8Array; width: number }>;
+  /** The default skies (PLAN §17.6): the starter's night atlas for the base, its day atlas for the others. */
+  defaultSky: { base: Uint8Array; other: Uint8Array };
+  /** The JSON a new tab's layer starts from: the starter's day layer. */
+  newLayerText: string;
+}
+
+/**
+ * The new pack from sky tabs (PLAN §17.8): the template with each included tab's layer file and texture written,
+ * every template sky layer that no included tab writes removed (with its texture, unless something else still
+ * uses it), and the hero layer, image and .mcmeta put in as before. Everything else is copied unchanged.
+ */
+export function assembleTabs(template: PackFiles, inputs: TabPackInputs): PackResult {
+  const info = readTemplate(template);
+  const problems = [...info.problems];
+  const heroPath = texturePath(inputs.texture);
+  if (heroPath === null) problems.push(`The texture "${inputs.texture}" can't be placed in a pack: ${textureProblem(inputs.texture)}`);
+  if (problems.length > 0) return { ok: false, problems };
+
+  const warnings = [...info.warnings, ...tabNotes(inputs.tabs, template).map((n) => n.text)];
+  const files: PackFiles = new Map(template);
+  const outputs = layerOutputs(inputs.tabs, template, { heroTexturePath: heroPath, newLayerText: inputs.newLayerText });
+  const written = new Set(outputs.map((o) => o.jsonPath));
+
+  // Template sky layers no included tab writes: excluded or deleted tabs (decision 17.3.7).
+  const dropped = info.skyLayers.filter((l) => !written.has(l.file));
+  for (const layer of dropped) files.delete(layer.file);
+  if (dropped.length > 0) {
+    warnings.push(`Left out, as their tabs are not included: ${dropped.map((l) => l.file).join(', ')}.`);
+  }
+
+  for (const out of outputs) {
+    files.set(out.jsonPath, encoder.encode(out.text));
+    if (out.textureFrom === 'user') {
+      const sky = inputs.skyPngs.get(out.tabId);
+      if (sky) {
+        files.set(out.texturePath, sky.png);
+        if (sky.width > 8192) {
+          warnings.push(`${out.texturePath} is ${sky.width} px wide; Nuit packs usually stay within 8192 px, the limit of many GPUs.`);
+        }
+      } else {
+        files.set(out.texturePath, out.base ? inputs.defaultSky.base : inputs.defaultSky.other);
+        warnings.push(`The sky for ${out.texturePath} isn't loaded yet, so the default sky went in.`);
+      }
+    } else if (out.textureFrom === 'default') {
+      files.set(out.texturePath, out.base ? inputs.defaultSky.base : inputs.defaultSky.other);
+    }
+  }
+
+  // A dropped layer's texture goes too, unless the hero, a written layer, or another Nuit layer still names it.
+  for (const layer of dropped) {
+    const path = layer.texturePath;
+    if (path === null || !files.has(path) || path === heroPath || outputs.some((o) => o.texturePath === path)) continue;
+    const id = `"${textureIdFromPath(path)}"`;
+    const stillUsed = [...files].some(([p, bytes]) => NUIT_LAYER.test(p) && p !== info.heroLayerFile && decoder.decode(bytes).includes(id));
+    if (!stillUsed) files.delete(path);
+  }
+
+  const heroLayer = outputs.length + 1;
+  for (const other of info.otherLayers) {
+    if (other.layer >= 1 && other.layer <= heroLayer) {
+      warnings.push(`${other.file} (${other.type}) is layer ${other.layer}, among the sky and hero layers (1 to ${heroLayer}); `
+        + 'it was copied as it is, so check the draw order.');
+    }
+  }
+
+  files.set(info.heroLayerFile, encoder.encode(inputs.jsonText));
+  files.set(heroPath!, inputs.heroPng);
+  files.set(`${heroPath}.mcmeta`, encoder.encode(HERO_MCMETA));
+  if (info.oldHeroTexturePath && info.oldHeroTexturePath !== heroPath && template.has(info.oldHeroTexturePath)) {
+    warnings.push(`The template's hero texture ${info.oldHeroTexturePath} is no longer used, and was left in the pack.`);
   }
   return { ok: true, files, warnings };
 }

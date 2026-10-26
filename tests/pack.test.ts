@@ -5,10 +5,13 @@ import { describe, expect, it } from 'vitest';
 import sky1Text from '../reference/pack-example/assets/nuit/sky/sky1_night.json?raw';
 import sky2Text from '../reference/pack-example/assets/nuit/sky/sky2_day.json?raw';
 import sky3Text from '../reference/pack-example/assets/nuit/sky/sky3_image.json?raw';
+import starterDayText from '../reference/samples/starter_pack/assets/nuit/sky/sky2_day.json?raw';
 import { buildSky3, HERO_MCMETA, serializeSky3 } from '../src/json.ts';
 import {
-  assemblePack, isPng, isZipFile, readTemplate, readZip, texturePath, writeZip, type PackFiles, type PackInputs,
+  assemblePack, assembleTabs, isPng, isZipFile, readTemplate, readZip, texturePath, writeZip, type PackFiles, type PackInputs,
 } from '../src/pack.ts';
+import type { SkyTab } from '../src/schema.ts';
+import { mergeTemplate, newTab } from '../src/tabs.ts';
 import { cases, params } from './vectors.ts';
 
 const enc = (s: string): Uint8Array => new TextEncoder().encode(s);
@@ -174,5 +177,112 @@ describe('the bundled starter template (PLAN §16.7)', () => {
 
   it('declares a 26.2 pack format', () => {
     expect(JSON.parse(dec(starter.get('pack.mcmeta'))).pack).toMatchObject({ min_format: 88, max_format: 88 });
+  });
+});
+
+describe('assembling from sky tabs (PLAN §17.8)', () => {
+  const NIGHT_DEFAULT = bytes(91);
+  const DAY_DEFAULT = bytes(92);
+  const tabsOf = (files: PackFiles): SkyTab[] => {
+    let n = 0;
+    return mergeTemplate([], readTemplate(files).skyLayers, () => `t${++n}`, { addMissing: true });
+  };
+  const withSky = (tab: SkyTab): SkyTab => ({ ...tab, sky: { ...tab.sky, user: { name: 'mine.png' } } });
+
+  function assembleWith(tabs: SkyTab[], skyPngs: [string, number][] = [], files = template()): { files: PackFiles; warnings: string[] } {
+    const json = buildSky3(params(cases[2], { layer: tabs.filter((t) => t.include).length + 1 }));
+    const result = assembleTabs(files, {
+      jsonText: serializeSky3(json), texture: json.animatableTextures[0].texture, heroPng: bytes(30), tabs,
+      skyPngs: new Map(skyPngs.map(([id, b]) => [id, { png: bytes(b), width: 1536 }])),
+      defaultSky: { base: NIGHT_DEFAULT, other: DAY_DEFAULT }, newLayerText: starterDayText,
+    });
+    if (!result.ok) throw new Error(`expected ok, got: ${result.problems.join(' | ')}`);
+    return result;
+  }
+
+  it('with the template\'s own tabs: the same files, the layers rewritten for 26.2, the textures kept', () => {
+    const { files, warnings } = assembleWith(tabsOf(template()));
+    expect([...files.keys()].sort()).toEqual([...template().keys()].sort());
+    const night = JSON.parse(dec(files.get('assets/nuit/sky/sky1_night.json')));
+    const day = JSON.parse(dec(files.get('assets/nuit/sky/sky2_day.json')));
+    expect([night.blend, night.properties.fade.alwaysOn, night.properties.layer, night.properties.fade.keyFrames])
+      .toEqual([undefined, undefined, 1, {}]);
+    expect([day.properties.layer, day.properties.fade.keyFrames]).toEqual([2, { 4000: 1, 8000: 1, 16000: 0, 20000: 0 }]);
+    expect(files.get('assets/sasheen/textures/sky/night.png')).toEqual(bytes(1));
+    expect(files.get('assets/sasheen/textures/sky/day.png')).toEqual(bytes(2));
+    expect(JSON.parse(dec(files.get('assets/nuit/sky/sky3_image.json'))).properties.layer).toBe(3);
+    expect(warnings.filter((w) => !w.includes('top-level "blend"'))).toEqual([]);
+  });
+
+  it('puts each tab\'s own sky at its texture', () => {
+    const [night, day] = tabsOf(template());
+    const { files } = assembleWith([night, withSky(day)], [[day.id, 20]]);
+    expect(files.get('assets/sasheen/textures/sky/day.png')).toEqual(bytes(20));
+    expect(files.get('assets/sasheen/textures/sky/night.png')).toEqual(bytes(1));
+  });
+
+  it('leaves out an excluded tab\'s layer and texture, and the next tab becomes the always-on base', () => {
+    const [night, day] = tabsOf(template());
+    const { files, warnings } = assembleWith([{ ...night, include: false }, day]);
+    expect(files.has('assets/nuit/sky/sky1_night.json')).toBe(false);
+    expect(files.has('assets/sasheen/textures/sky/night.png')).toBe(false);
+    const dayJson = JSON.parse(dec(files.get('assets/nuit/sky/sky2_day.json')));
+    expect([dayJson.properties.layer, dayJson.properties.fade.keyFrames]).toEqual([1, {}]);
+    expect(warnings).toContainEqual(expect.stringContaining('Left out'));
+  });
+
+  it('keeps an excluded layer\'s texture that an included layer still uses', () => {
+    const files = template();
+    files.set('assets/nuit/sky/sky2_day.json', enc(sky2Text.replace('day.png', 'night.png')));
+    const [night, day] = tabsOf(files);
+    expect(assembleWith([{ ...night, include: false }, day], [], files).files.has('assets/sasheen/textures/sky/night.png')).toBe(true);
+  });
+
+  it('adds a new tab as a new layer, with its own sky or the default one', () => {
+    const [night, day] = tabsOf(template());
+    const sunrise = { ...newTab('s', 'Sunrise'), keyFrames: [{ tick: 23000, alpha: 1 }, { tick: 1000, alpha: 0 }] };
+    const own = assembleWith([night, day, withSky(sunrise)], [['s', 40]]).files;
+    expect(JSON.parse(dec(own.get('assets/nuit/sky/sky3_sunrise.json')))).toMatchObject({
+      type: 'nuit:square-textured', texture: 'sasheen:textures/sky/sunrise.png',
+      properties: { layer: 3, fade: { duration: 24000, keyFrames: { 1000: 0, 23000: 1 } } },
+    });
+    expect(own.get('assets/sasheen/textures/sky/sunrise.png')).toEqual(bytes(40));
+    expect(JSON.parse(dec(own.get('assets/nuit/sky/sky3_image.json'))).properties.layer).toBe(4);
+
+    const { files, warnings } = assembleWith([night, day, sunrise]);
+    expect(files.get('assets/sasheen/textures/sky/sunrise.png')).toEqual(DAY_DEFAULT);
+    expect(warnings).toContainEqual('Sunrise has no sky of its own, so the default sky goes in.');
+  });
+
+  it('the base gets the night default; a picked sky that is not loaded falls back to the default, with a note', () => {
+    const files = template();
+    files.delete('assets/sasheen/textures/sky/night.png');
+    const [night, day] = tabsOf(files);
+    expect(assembleWith([night, day], [], files).files.get('assets/sasheen/textures/sky/night.png')).toEqual(NIGHT_DEFAULT);
+    const { files: out, warnings } = assembleWith([night, withSky(day)], [], files);
+    expect(out.get('assets/sasheen/textures/sky/day.png')).toEqual(DAY_DEFAULT);
+    expect(warnings).toContainEqual(expect.stringContaining('loaded yet'));
+  });
+
+  it('notes another Nuit layer among the renumbered ones, and copies it unchanged', () => {
+    const files = template();
+    const decorations = '{"schemaVersion": 1, "type": "nuit:decorations", "properties": {"layer": 2}}';
+    files.set('assets/nuit/sky/stars.json', enc(decorations));
+    const { files: out, warnings } = assembleWith(tabsOf(files), [], files);
+    expect(dec(out.get('assets/nuit/sky/stars.json'))).toBe(decorations);
+    expect(warnings).toContainEqual(expect.stringContaining('stars.json (nuit:decorations) is layer 2'));
+  });
+
+  it('refuses what assemblePack refuses, and round-trips through a zip', () => {
+    const tabs = tabsOf(template());
+    const inputs = {
+      jsonText: '', texture: 'Hero.png', heroPng: bytes(30), tabs, skyPngs: new Map(),
+      defaultSky: { base: NIGHT_DEFAULT, other: DAY_DEFAULT }, newLayerText: starterDayText,
+    };
+    expect(assembleTabs(template(), inputs).ok).toBe(false);
+    expect(assembleTabs(new Map(), { ...inputs, texture: 'sasheen:textures/sky/hero.png' }).ok).toBe(false);
+    const { files } = assembleWith(tabs);
+    const back = readZip(writeZip(files));
+    for (const [path, data] of files) expect(back.get(path)).toEqual(data);
   });
 });
