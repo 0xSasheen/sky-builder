@@ -4,7 +4,7 @@
 import { unzipSync, zipSync, type Zippable } from 'fflate';
 import { FIXED_JSON } from './constants.ts';
 import { HERO_MCMETA, textureProblem } from './json.ts';
-import type { SkyTarget } from './schema.ts';
+import type { FadeKey, SkyTarget } from './schema.ts';
 
 /** A pack's files: path inside the zip → bytes. */
 export type PackFiles = Map<string, Uint8Array>;
@@ -16,6 +16,12 @@ export interface SkyLayer {
   texturePath: string | null;
   /** The always-on layer (empty keyFrames) is the night sky; one that fades is the day sky. */
   role: 'night' | 'day';
+  /** Its `properties.layer` (Nuit's default is 0), which sets the draw order. */
+  layer: number;
+  /** Its `fade.keyFrames`, sorted by tick. Entries Nuit couldn't read are left out. */
+  keyFrames: FadeKey[];
+  /** Its `fade.duration` (Nuit's default is 24000). */
+  duration: number;
 }
 
 export interface TemplateInfo {
@@ -56,6 +62,15 @@ function rotationMatches(rotation: unknown): boolean {
     && JSON.stringify(axis[0]) === JSON.stringify(FIXED_JSON.axis);
 }
 
+/** A layer's `fade.keyFrames` ({"4000": 1.0, …}) as a list sorted by tick, skipping entries that aren't numbers. */
+function readKeyFrames(keyFrames: unknown): FadeKey[] {
+  if (!isObj(keyFrames)) return [];
+  return Object.entries(keyFrames)
+    .map(([tick, alpha]) => ({ tick: Number(tick), alpha }))
+    .filter((k): k is FadeKey => Number.isFinite(k.tick) && typeof k.alpha === 'number')
+    .sort((a, b) => a.tick - b.tick);
+}
+
 /** Reads a template's Nuit layers: which file is the hero layer, and where each sky layer's texture lives. */
 export function readTemplate(files: PackFiles): TemplateInfo {
   const problems: string[] = [];
@@ -84,7 +99,14 @@ export function readTemplate(files: PackFiles): TemplateInfo {
       // when its keyFrames are empty (AbstractSkybox.updateAlpha, PLAN §17.1).
       const fade = isObj(props.fade) ? props.fade : {};
       const alwaysOn = !isObj(fade.keyFrames) || Object.keys(fade.keyFrames).length === 0;
-      skyLayers.push({ file, texturePath: texturePath(texture), role: alwaysOn ? 'night' : 'day' });
+      skyLayers.push({
+        file,
+        texturePath: texturePath(texture),
+        role: alwaysOn ? 'night' : 'day',
+        layer: typeof props.layer === 'number' ? props.layer : 0,
+        keyFrames: readKeyFrames(fade.keyFrames),
+        duration: typeof fade.duration === 'number' ? fade.duration : 24000,
+      });
       if (!rotationMatches(props.rotation)) {
         warnings.push(`${file} turns differently from the hero layer (speed, axis or skyboxRotation), so the hero `
           + 'would drift against this sky.');

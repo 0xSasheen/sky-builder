@@ -92,6 +92,48 @@ export type AtlasLayout = { ok: true; faceSize: number } | { ok: false; message:
 /** One fade keyframe of a sky layer: at `tick` the layer's alpha is `alpha` (PLAN §17.2). */
 export interface FadeKey { tick: number; alpha: number }
 
+// --- Sky tabs (PLAN §17.4) -----------------------------------------------------
+
+/** A tab's sky settings. The image itself is kept elsewhere (IndexedDB slot "sky:<tab id>"). */
+export interface TabSky {
+  /** The file the user chose for this tab, if any; without one the tab shows the template's texture or the default. */
+  user: { name: string } | null;
+  type: SkyType;
+  /** For a panorama: null means the default for its width. */
+  faceSize: number | null;
+  leftBearingDeg: number;
+}
+
+/** The template layer a tab writes (PLAN §17.4). */
+export interface TemplateLayerRef {
+  /** Its JSON file, e.g. assets/nuit/sky/sky2_day.json. */
+  file: string;
+  /** Its texture in the zip, or null if it names none Minecraft could use. */
+  texturePath: string | null;
+  /** Its fade duration and keyframes as the template has them, for the "Template's" button. */
+  duration: number;
+  keyFrames: FadeKey[];
+}
+
+/** One sky layer of the pack, as a tab (PLAN §17.4). Tab order is layer order. */
+export interface SkyTab {
+  /** Stable and never shown. */
+  id: string;
+  /** Unique (case-insensitive) and non-empty. */
+  name: string;
+  /** Whether the layer goes into the pack. The first included tab is the always-on base. */
+  include: boolean;
+  sky: TabSky;
+  keyFrames: FadeKey[];
+  /** True once the user edits the keyframes; until then a newly loaded template's keyframes replace them. */
+  keyFramesEdited: boolean;
+  /** Null for a tab the template doesn't have: it becomes a new layer file. */
+  templateLayer: TemplateLayerRef | null;
+}
+
+/** What the preview shows (PLAN §17.5). */
+export type PreviewMode = 'blend' | 'tab';
+
 /** Which sky layer(s) of a pack template the current sky replaces (PLAN §16). Day by default. */
 export type SkyTarget = 'day' | 'night' | 'both' | 'none';
 

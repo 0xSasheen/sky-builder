@@ -48,7 +48,7 @@ describe('reading a template (PLAN §16.1)', () => {
     const info = readTemplate(template());
     expect(info.heroLayerFile).toBe('assets/nuit/sky/sky3_image.json');
     expect(info.oldHeroTexturePath).toBe('assets/sasheen/textures/sky/hero.png');
-    expect(info.skyLayers).toEqual([
+    expect(info.skyLayers).toMatchObject([
       { file: 'assets/nuit/sky/sky1_night.json', texturePath: 'assets/sasheen/textures/sky/night.png', role: 'night' },
       { file: 'assets/nuit/sky/sky2_day.json', texturePath: 'assets/sasheen/textures/sky/day.png', role: 'day' },
     ]);
