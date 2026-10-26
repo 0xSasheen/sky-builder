@@ -1,10 +1,12 @@
 // Sky tabs (PLAN §17.4): one tab per sky layer of the pack, in layer order. The first included tab is the
-// always-on base; the others fade over it by their keyframes. Pure: no DOM or Three.js, so vitest drives it.
+// always-on base; the others fade over it by their keyframes. Pure: no DOM or Three.js (rule 2's spirit; the
+// fade math itself is math.fadeAlpha), so vitest drives it.
 // (Java: a class of static methods over plain records.)
 
 import { DEFAULTS, PANO_LEFT_BEARING_DEG, TICKS_PER_DAY } from './constants.ts';
+import { fadeAlpha } from './math.ts';
 import type { PackFiles, SkyLayer } from './pack.ts';
-import type { FadeKey, SkyTab, TemplateLayerRef } from './schema.ts';
+import type { FadeKey, PreviewMode, SkyTab, TemplateLayerRef } from './schema.ts';
 
 /** Makes a fresh tab id. Passed in, so these functions stay pure and tests can count. */
 export type NewId = () => string;
@@ -139,6 +141,19 @@ export function layerPlan(tabs: readonly SkyTab[]): { layers: PlannedLayer[]; he
 /** The keyframes a layer's file gets, and the preview uses: none for the base, which is always on. */
 export function effectiveKeyFrames(planned: PlannedLayer): FadeKey[] {
   return planned.base ? [] : planned.tab.keyFrames;
+}
+
+/** One sky layer as the preview draws it: bottom first, the first one opaque. */
+export interface PreviewLayer { tabId: string; alpha: number }
+
+/**
+ * What the preview shows (PLAN §17.5). "blend": the included tabs in layer order, the base at alpha 1 and each
+ * other at its fade alpha for the time, as Nuit draws them (one included tab: just that sky). "tab": the open
+ * tab alone, opaque, whether or not it is included.
+ */
+export function previewLayers(tabs: readonly SkyTab[], mode: PreviewMode, openTabId: string, ticks: number): PreviewLayer[] {
+  if (mode === 'tab') return tabs.some((t) => t.id === openTabId) ? [{ tabId: openTabId, alpha: 1 }] : [];
+  return layerPlan(tabs).layers.map((planned) => ({ tabId: planned.tab.id, alpha: fadeAlpha(effectiveKeyFrames(planned), ticks) }));
 }
 
 /** Rows Nuit can't read (red): a tick that isn't a whole number in [0, 24000), or one used twice. */

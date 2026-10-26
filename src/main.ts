@@ -53,6 +53,9 @@ const state: AppState = {
 const canvas = document.querySelector<HTMLCanvasElement>('#sky')!;
 const viewport = document.querySelector<HTMLDivElement>('#viewport')!;
 const scene = new SkyScene(canvas);
+/** The single sky, as the only layer, until the sky tabs arrive (PLAN §17). */
+const SKY_TAB = 'sky';
+scene.setSkyLayers([{ tabId: SKY_TAB, alpha: 1 }]);
 const ui = new Ui({
   onView: updateView,
   onHero: updateHero,
@@ -308,7 +311,7 @@ function rememberSky(): void {
 
 /** While the left-edge slider moves, turn the sky by the difference instead of converting (PLAN §13.7). */
 function previewLeftBearing(leftBearingDeg: number): void {
-  if (shownLeftBearing !== null) scene.setSkyTurnDeg(leftBearingDeg - shownLeftBearing);
+  if (shownLeftBearing !== null) scene.setSkyTurnDeg(SKY_TAB, leftBearingDeg - shownLeftBearing);
 }
 
 async function loadSky(): Promise<void> {
@@ -345,7 +348,7 @@ async function loadSky(): Promise<void> {
   } else if (kind === 'atlas') {
     const layout = atlasLayout(image.width, image.height);
     if (layout.ok) {
-      scene.setAtlas(image, layout.faceSize);
+      scene.setAtlas(SKY_TAB, image, layout.faceSize);
       shownLeftBearing = null;
       skyForPack = { blob: file, width: image.width };
       rememberSky();
@@ -358,7 +361,7 @@ async function loadSky(): Promise<void> {
     ui.showSkyStatus(`${name} is ${size}: a sky must be a 3:2 atlas or a 2:1 panorama. ${keep}`, true);
   }
   ui.showPanoramaOptions(null);
-  scene.setSkyTurnDeg(0); // drop any left-edge preview; the sky on screen is unchanged or a new atlas
+  scene.setSkyTurnDeg(SKY_TAB, 0); // drop any left-edge preview; the sky on screen is unchanged or a new atlas
   image.close(); // the cropped canvases hold their own copies
 }
 
@@ -383,7 +386,7 @@ function convertPanorama(image: ImageBitmap, faceSize: number, leftBearingDeg: n
     }
     finish();
     if (reply.type === 'done') {
-      scene.setAtlas(reply.atlas, faceSize); // also ends the preview turn
+      scene.setAtlas(SKY_TAB, reply.atlas, faceSize); // also ends the preview turn
       shownLeftBearing = leftBearingDeg;
       reply.atlas.close();
       atlasPng = { blob: reply.png, fileName: `${name.replace(/\.[^.]*$/, '')}_atlas.png` };
@@ -393,13 +396,13 @@ function convertPanorama(image: ImageBitmap, faceSize: number, leftBearingDeg: n
       const seconds = ((performance.now() - started) / 1000).toFixed(1);
       ui.showSkyStatus(`${label} → atlas ${3 * faceSize} × ${2 * faceSize} (faces ${faceSize} px) · ${seconds} s`);
     } else {
-      scene.setSkyTurnDeg(0);
+      scene.setSkyTurnDeg(SKY_TAB, 0);
       ui.showSkyStatus(`${label}: the conversion failed (${reply.message}). The previous sky is still shown.`, true);
     }
   };
   worker.onerror = () => {
     finish();
-    scene.setSkyTurnDeg(0);
+    scene.setSkyTurnDeg(SKY_TAB, 0);
     ui.showSkyStatus(`${label}: the converter stopped unexpectedly. The previous sky is still shown.`, true);
   };
   const request: ConvertRequest = { image, faceSize, leftBearingDeg };

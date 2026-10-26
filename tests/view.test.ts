@@ -7,8 +7,9 @@ import { describe, expect, it } from 'vitest';
 import { FACES } from '../src/constants.ts';
 import { buildSky3 } from '../src/json.ts';
 import { directionToPanorama, heroPieces } from '../src/math.ts';
-import { facePlacement, heroGeometry, heroMappingEuler, skyTurnRotationY } from '../src/scene.ts';
+import { facePlacement, heroGeometry, heroMappingEuler, layerDrawSettings, skyTurnRotationY } from '../src/scene.ts';
 import type { FaceName, Vec3 } from '../src/schema.ts';
+import { newTab, previewLayers } from '../src/tabs.ts';
 import { applyCameraView } from '../src/view.ts';
 import { cases, params } from './vectors.ts';
 
@@ -145,5 +146,39 @@ describe('panorama heading preview (PLAN §13.7)', () => {
   it('a positive turn moves the sky clockwise, like a bearing', () => {
     const north = new Vector3(0, 0, -1).applyMatrix4(new Matrix4().makeRotationY(skyTurnRotationY(90)));
     expect(north.distanceTo(new Vector3(1, 0, 0))).toBeLessThan(1e-12); // north turns to east
+  });
+});
+
+describe('sky layers (PLAN §17.5)', () => {
+  it('the base is opaque and drawn first; each layer over it is transparent, in order, at its alpha', () => {
+    expect(layerDrawSettings(0, 1)).toEqual({ renderOrder: 0, transparent: false, opacity: 1, visible: true });
+    expect(layerDrawSettings(1, 0.25)).toEqual({ renderOrder: 1, transparent: true, opacity: 0.25, visible: true });
+    expect(layerDrawSettings(2, 1).renderOrder).toBe(2);
+  });
+
+  it('a layer at alpha 0 is hidden, as Nuit skips it', () => {
+    expect(layerDrawSettings(1, 0).visible).toBe(false);
+  });
+
+  it('drawn the way Three.js orders and blends them, the starter\'s tabs give α·Day + (1 − α)·Night', () => {
+    // One grey level per sky: night 0.2, day 0.9, opaque textures. Three.js draws opaque meshes first, then
+    // transparent ones by renderOrder, each with NormalBlending: C ← α·S + (1 − α)·C.
+    const night = newTab('n', 'Night');
+    const day = { ...newTab('d', 'Day'), keyFrames: [
+      { tick: 4000, alpha: 1 }, { tick: 8000, alpha: 1 }, { tick: 16000, alpha: 0 }, { tick: 20000, alpha: 0 },
+    ] };
+    const colour: Record<string, number> = { n: 0.2, d: 0.9 };
+    const draw = (ticks: number): number => {
+      const meshes = previewLayers([night, day], 'blend', 'd', ticks)
+        .map((layer, index) => ({ ...layer, ...layerDrawSettings(index, layer.alpha) }))
+        .filter((m) => m.visible)
+        .sort((a, b) => Number(a.transparent) - Number(b.transparent) || a.renderOrder - b.renderOrder);
+      let c = 0; // the cleared screen
+      for (const m of meshes) c = m.transparent ? m.opacity * colour[m.tabId] + (1 - m.opacity) * c : colour[m.tabId];
+      return c;
+    };
+    for (const [ticks, alpha] of [[0, 0.5], [6000, 1], [12000, 0.5], [18000, 0]]) {
+      expect(draw(ticks)).toBeCloseTo(alpha * 0.9 + (1 - alpha) * 0.2, 12);
+    }
   });
 });

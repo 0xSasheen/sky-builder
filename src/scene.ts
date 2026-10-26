@@ -14,10 +14,13 @@ import { applyCameraView } from './view.ts';
 
 const DEG = Math.PI / 180;
 
-/** Draw order: sky first, then the hero, then the overlay on top. */
+/**
+ * Draw order: the sky layers first (the base at 0, then 1, 2, … for the layers over it, PLAN §17.5), then the
+ * hero, then the overlay on top. The hero and overlay sit far above any number of sky tabs.
+ */
 const ORDER_SKY = 0;
-const ORDER_HERO = 10;
-const ORDER_OVERLAY = 20;
+const ORDER_HERO = 1000;
+const ORDER_OVERLAY = 2000;
 
 /** Overlay colours: magenta moves with the sky (it comes from the face table), cyan is fixed to the world. */
 const SKY_OVERLAY_COLOR = '#ff4dff';
@@ -44,6 +47,27 @@ export function facePlacement(face: FaceDef): Matrix4 {
  */
 export function skyTurnRotationY(turnDeg: number): number {
   return -turnDeg * DEG;
+}
+
+/**
+ * How the sky layer at a place in the draw order is drawn (PLAN §17.5). Three.js draws every opaque mesh before
+ * every transparent one, and sorts each list by renderOrder. So the base (index 0) is opaque, and each layer over
+ * it is transparent with renderOrder = its index and opacity = its fade alpha. MeshBasicMaterial with that opacity
+ * and NormalBlending (straight alpha) gives α·s·S + (1 − α·s)·C, which is Nuit's "normal" blend with
+ * ColorModulator (1, 1, 1, α). A layer at alpha 0 is hidden, as Nuit skips it.
+ */
+export function layerDrawSettings(index: number, alpha: number): {
+  renderOrder: number; transparent: boolean; opacity: number; visible: boolean;
+} {
+  if (index === 0) return { renderOrder: ORDER_SKY, transparent: false, opacity: 1, visible: true };
+  return { renderOrder: ORDER_SKY + index, transparent: true, opacity: alpha, visible: alpha > 0 };
+}
+
+/** One sky tab's six faces. */
+interface SkyLayerMeshes {
+  /** Turned only to preview a new panorama heading while its slider moves (PLAN §13.7). */
+  group: Group;
+  faces: Map<FaceName, Mesh<PlaneGeometry, MeshBasicMaterial>>;
 }
 
 /** heroGroup's rotation for a JSON mapping [X, Y, Z]: Euler order 'ZYX' is the matrix R_z·R_y·R_x (rule 4). */
@@ -83,11 +107,10 @@ export class SkyScene {
   /** Turned by the daily spin Y(θ) (BRIEF §4.5); holds everything that moves with the sky. */
   private readonly spinGroup = new Group();
   /**
-   * The six sky faces. Turned only to preview a new panorama heading while its slider moves (PLAN §13.7);
-   * the hero is outside it, because a new heading moves the sky, not the hero.
+   * Each sky tab's faces, by tab id (PLAN §17.5), each in its own group inside spinGroup. The hero is outside
+   * these groups, because a panorama heading preview turns a sky, not the hero.
    */
-  private readonly skyFaces = new Group();
-  private readonly faces = new Map<FaceName, Mesh<PlaneGeometry, MeshBasicMaterial>>();
+  private readonly skyLayers = new Map<string, SkyLayerMeshes>();
   /** Nuit's per-layer mapping M (BRIEF §4.5), applied before the spin. */
   private readonly heroGroup = new Group();
   private readonly hero = new Mesh(new BufferGeometry(), new MeshBasicMaterial({
@@ -108,17 +131,6 @@ export class SkyScene {
     this.renderer.outputColorSpace = LinearSRGBColorSpace;
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
-    for (const face of FACES) {
-      const material = new MeshBasicMaterial({ color: EMPTY_FACE_COLOR, depthWrite: false });
-      const mesh = new Mesh(new PlaneGeometry(2, 2), material);
-      facePlacement(face).decompose(mesh.position, mesh.quaternion, mesh.scale);
-      mesh.renderOrder = ORDER_SKY;
-      mesh.name = `face_${face.name}`;
-      this.faces.set(face.name, mesh);
-      this.skyFaces.add(mesh);
-    }
-    this.spinGroup.add(this.skyFaces);
-
     this.hero.renderOrder = ORDER_HERO;
     this.hero.name = 'hero';
     this.hero.visible = false; // until there is both an image and a JSON
@@ -132,12 +144,71 @@ export class SkyScene {
     this.setOverlayVisible(false);
   }
 
+  /** A tab's faces, made the first time they are needed; hidden until setSkyLayers shows them. */
+  private layerFor(tabId: string): SkyLayerMeshes {
+    let layer = this.skyLayers.get(tabId);
+    if (layer) return layer;
+    layer = { group: new Group(), faces: new Map() };
+    layer.group.name = `sky_${tabId}`;
+    layer.group.visible = false;
+    for (const face of FACES) {
+      // No depth test or writes: the layers lie on the same cube, and draw order alone decides what is on top.
+      const material = new MeshBasicMaterial({ color: EMPTY_FACE_COLOR, depthTest: false, depthWrite: false });
+      const mesh = new Mesh(new PlaneGeometry(2, 2), material);
+      facePlacement(face).decompose(mesh.position, mesh.quaternion, mesh.scale);
+      mesh.renderOrder = ORDER_SKY;
+      mesh.name = `face_${face.name}`;
+      layer.faces.set(face.name, mesh);
+      layer.group.add(mesh);
+    }
+    this.skyLayers.set(tabId, layer);
+    this.spinGroup.add(layer.group);
+    return layer;
+  }
+
+  /** Frees a deleted tab's faces and textures. */
+  removeSkyLayer(tabId: string): void {
+    const layer = this.skyLayers.get(tabId);
+    if (!layer) return;
+    for (const mesh of layer.faces.values()) {
+      mesh.material.map?.dispose();
+      mesh.material.dispose();
+      mesh.geometry.dispose();
+    }
+    this.spinGroup.remove(layer.group);
+    this.skyLayers.delete(tabId);
+    this.requestRender();
+  }
+
   /**
-   * Crops each cell of the atlas onto its own canvas, so nothing bleeds between cells.
+   * Which tabs' skies show, bottom first, and at what alpha (tabs.previewLayers); every other tab is hidden.
+   * The first is drawn opaque, the rest blended over it (layerDrawSettings).
+   */
+  setSkyLayers(layers: readonly { tabId: string; alpha: number }[]): void {
+    for (const layer of this.skyLayers.values()) layer.group.visible = false;
+    layers.forEach(({ tabId, alpha }, index) => {
+      const layer = this.layerFor(tabId);
+      const settings = layerDrawSettings(index, alpha);
+      layer.group.visible = settings.visible;
+      for (const mesh of layer.faces.values()) {
+        mesh.renderOrder = settings.renderOrder;
+        if (mesh.material.transparent !== settings.transparent) {
+          mesh.material.transparent = settings.transparent;
+          mesh.material.needsUpdate = true; // opaque and transparent use different shader settings
+        }
+        mesh.material.opacity = settings.opacity;
+      }
+    });
+    this.requestRender();
+  }
+
+  /**
+   * Crops each cell of the atlas onto its own canvas for a tab's faces, so nothing bleeds between cells.
    * The caller checks the 3:2 shape first (math.atlasLayout). A new atlas ends any preview turn.
    */
-  setAtlas(image: CanvasImageSource, faceSize: number): void {
-    this.skyFaces.rotation.y = 0;
+  setAtlas(tabId: string, image: CanvasImageSource, faceSize: number): void {
+    const layer = this.layerFor(tabId);
+    layer.group.rotation.y = 0;
     const size = Math.min(faceSize, this.renderer.capabilities.maxTextureSize);
     for (const face of FACES) {
       const canvas = document.createElement('canvas');
@@ -154,7 +225,7 @@ export class SkyScene {
       texture.magFilter = texture.minFilter = NearestFilter;
       texture.generateMipmaps = false;
 
-      const material = this.faces.get(face.name)!.material;
+      const material = layer.faces.get(face.name)!.material;
       material.map?.dispose();
       material.map = texture;
       material.color.set('#ffffff');
@@ -208,11 +279,13 @@ export class SkyScene {
   }
 
   /**
-   * Turns the sky faces (not the hero) by a bearing, clockwise from above. Turning an atlas converted with
+   * Turns a tab's sky faces (not the hero) by a bearing, clockwise from above. Turning an atlas converted with
    * left-edge bearing λ0 by Δ shows what converting with λ0 + Δ gives, at once (view.test.ts checks this).
    */
-  setSkyTurnDeg(turnDeg: number): void {
-    this.skyFaces.rotation.y = skyTurnRotationY(turnDeg);
+  setSkyTurnDeg(tabId: string, turnDeg: number): void {
+    const layer = this.skyLayers.get(tabId);
+    if (!layer) return;
+    layer.group.rotation.y = skyTurnRotationY(turnDeg);
     this.requestRender();
   }
 

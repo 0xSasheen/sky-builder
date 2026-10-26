@@ -7,7 +7,7 @@ import starterDayText from '../reference/samples/starter_pack/assets/nuit/sky/sk
 import { readTemplate, type PackFiles } from '../src/pack.ts';
 import type { SkyTab } from '../src/schema.ts';
 import {
-  keyFrameProblems, layerJson, layerOutputs, layerPlan, mergeTemplate, newTab, nextTabName, skySource, slugify,
+  keyFrameProblems, layerJson, layerOutputs, layerPlan, mergeTemplate, newTab, nextTabName, previewLayers, skySource, slugify,
   tabNameFromFile, tabNameProblem, tabNotes, textureIdFromPath, uniqueName,
 } from '../src/tabs.ts';
 
@@ -208,5 +208,27 @@ describe('layer files (decision 17.3.8)', () => {
 
   it('turns a texture path back into a texture name', () => {
     expect(textureIdFromPath('assets/sasheen/textures/sky/day.png')).toBe('sasheen:textures/sky/day.png');
+  });
+});
+
+describe('what the preview shows (decision 17.3.11)', () => {
+  const [night, day] = fromTemplate(starter());
+  const sunrise = { ...newTab('s', 'Sunrise'), keyFrames: [{ tick: 23000, alpha: 1 }] };
+
+  it('blended: the included tabs in order, the base at 1 and the others at their fade alpha', () => {
+    expect(previewLayers([night, day], 'blend', day.id, 0)).toEqual([{ tabId: night.id, alpha: 1 }, { tabId: day.id, alpha: 0.5 }]);
+    expect(previewLayers([night, day, sunrise], 'blend', night.id, 6000).map((l) => l.alpha)).toEqual([1, 1, 1]);
+    expect(previewLayers([night, { ...day, include: false }, sunrise], 'blend', night.id, 18000))
+      .toEqual([{ tabId: night.id, alpha: 1 }, { tabId: 's', alpha: 1 }]);
+  });
+
+  it('one included tab is the base, so it just spins, whatever its keyframes', () => {
+    expect(previewLayers([{ ...night, include: false }, day], 'blend', night.id, 18000)).toEqual([{ tabId: day.id, alpha: 1 }]);
+  });
+
+  it('this tab only: the open tab alone, opaque, even if it is not included; nothing if no tab is open', () => {
+    expect(previewLayers([night, { ...day, include: false }], 'tab', day.id, 18000)).toEqual([{ tabId: day.id, alpha: 1 }]);
+    expect(previewLayers([night, day], 'tab', 'gone', 0)).toEqual([]);
+    expect(previewLayers([{ ...night, include: false }], 'blend', night.id, 0)).toEqual([]);
   });
 });
