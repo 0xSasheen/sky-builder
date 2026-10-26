@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { K_RANGE, PLAY_SPEEDS } from '../src/constants.ts';
 import {
-  advanceTicks, analyse, applyMapping, importAspectMismatch, aspectFromUv, atlasLayout, atlasPointToCube, clampHero, clampPitch, faceToNorthUv,
+  advanceTicks, analyse, applyMapping, fadeAlpha, importAspectMismatch, aspectFromUv, atlasLayout, atlasPointToCube, clampHero, clampPitch, faceToNorthUv,
   heightFromK, heroCentreDirection, heroPieces, kFromHeight, mcFacing, mcYawPitch, northUvToFace, noonBearingDeg,
   quadrantBearing, recoverParams, roundTo, scaleK, solveHero, sunAngleDeg, tiltedMappingX, tiltedUv, ticksToClock,
   uvRangeToFaceRect, viewToward, wallUv,
 } from '../src/math.ts';
-import type { Vec3 } from '../src/schema.ts';
+import type { FadeKey, Vec3 } from '../src/schema.ts';
 import { cases, params } from './vectors.ts';
 
 const tilted = cases.filter((c) => c.mode === 'tilted');
@@ -368,5 +368,68 @@ describe('import aspect check (decision 11.9)', () => {
     const m = importAspectMismatch(300, 400, uv);
     expect(m!.image).toBeCloseTo(0.75, 12);
     expect(m!.json).toBeCloseTo(1063 / 1502, 3);
+  });
+});
+
+describe('fade alpha, as Nuit computes it (PLAN §17.2)', () => {
+  /** The starter's and the pack example's day layer. */
+  const day: FadeKey[] = [
+    { tick: 4000, alpha: 1 }, { tick: 8000, alpha: 1 }, { tick: 16000, alpha: 0 }, { tick: 20000, alpha: 0 },
+  ];
+
+  it('the day layer over a day: rising 2 AM to 10 AM, full to 2 PM, falling to 10 PM, gone to 2 AM', () => {
+    expect(fadeAlpha(day, 0)).toBe(0.5); // the worked example in PLAN §17.2: wraps from 20000 to 4000
+    expect(fadeAlpha(day, 2000)).toBe(0.75);
+    expect(fadeAlpha(day, 4000)).toBe(1);
+    expect(fadeAlpha(day, 6000)).toBe(1);
+    expect(fadeAlpha(day, 12000)).toBe(0.5);
+    expect(fadeAlpha(day, 18000)).toBe(0);
+    expect(fadeAlpha(day, 22000)).toBe(0.25);
+    expect(fadeAlpha(day, 23999)).toBeCloseTo(0.4999, 4);
+  });
+
+  it('no keyframes is always on; one keyframe is constant', () => {
+    for (const t of [0, 6000, 18000]) {
+      expect(fadeAlpha([], t)).toBe(1);
+      expect(fadeAlpha([{ tick: 9000, alpha: 0.3 }], t)).toBe(0.3);
+    }
+  });
+
+  it('works in whole ticks, wraps the time, and clamps alphas as Nuit reads them', () => {
+    expect(fadeAlpha(day, 2000.9)).toBe(0.75);
+    expect(fadeAlpha(day, 2000 + 24000)).toBe(0.75);
+    expect(fadeAlpha(day, 2000 - 24000)).toBe(0.75);
+    expect(fadeAlpha([{ tick: 0, alpha: 2 }, { tick: 12000, alpha: -1 }], 0)).toBe(1);
+    expect(fadeAlpha([{ tick: 0, alpha: 2 }, { tick: 12000, alpha: -1 }], 6000)).toBe(0.5);
+  });
+
+  it('does not depend on the order of the keyframes, and handles one at tick 0', () => {
+    const shuffled = [day[2], day[0], day[3], day[1]];
+    for (let t = 0; t < 24000; t += 250) expect(fadeAlpha(shuffled, t)).toBe(fadeAlpha(day, t));
+    const fromMidnight = [{ tick: 0, alpha: 0 }, { tick: 6000, alpha: 1 }];
+    expect(fadeAlpha(fromMidnight, 0)).toBe(0);
+    expect(fadeAlpha(fromMidnight, 3000)).toBe(0.5);
+    expect(fadeAlpha(fromMidnight, 15000)).toBe(0.5); // back down from 6000 to 0 + 24000
+  });
+
+  it('matches a plain periodic linear interpolation for random keyframes (shares no code with the port)', () => {
+    // A small seeded generator, so the test is the same every run.
+    let seed = 12345;
+    const random = (): number => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+    for (let round = 0; round < 200; round++) {
+      const ticks = new Set<number>();
+      const count = 2 + Math.floor(random() * 6);
+      while (ticks.size < count) ticks.add(Math.floor(random() * 24000));
+      const keys = [...ticks].map((tick) => ({ tick, alpha: Math.round(random() * 4) / 4 }));
+      // The keyframes repeated over three days, sorted; then ordinary linear interpolation.
+      const sorted = [...keys].sort((a, b) => a.tick - b.tick);
+      const line = [-24000, 0, 24000].flatMap((d) => sorted.map((k) => ({ tick: k.tick + d, alpha: k.alpha })));
+      const plain = (t: number): number => {
+        const i = line.findIndex((k) => k.tick > t);
+        const [a, b] = [line[i - 1], line[i]];
+        return a.alpha + ((t - a.tick) / (b.tick - a.tick)) * (b.alpha - a.alpha);
+      };
+      for (let t = 0; t < 24000; t += 10) expect(fadeAlpha(keys, t)).toBeCloseTo(plain(t), 12);
+    }
   });
 });

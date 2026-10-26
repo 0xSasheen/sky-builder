@@ -89,6 +89,9 @@ export interface ViewState {
 /** The atlas cell grid, or why the image can't be one (BRIEF §8). */
 export type AtlasLayout = { ok: true; faceSize: number } | { ok: false; message: string };
 
+/** One fade keyframe of a sky layer: at `tick` the layer's alpha is `alpha` (PLAN §17.2). */
+export interface FadeKey { tick: number; alpha: number }
+
 /** Which sky layer(s) of a pack template the current sky replaces (PLAN §16). Day by default. */
 export type SkyTarget = 'day' | 'night' | 'both' | 'none';
 

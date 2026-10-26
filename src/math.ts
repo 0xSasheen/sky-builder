@@ -7,7 +7,7 @@ import {
   SUN_ANGLE_BEZIER, TICKS_PER_DAY, UV_DECIMALS, ZENITH_DEG,
 } from './constants.ts';
 import type {
-  AtlasLayout, FaceRect, HeroParams, HeroPiece, Readouts, RgbaImage, SkyKind, UvRange, Vec3, Warning,
+  AtlasLayout, FaceRect, FadeKey, HeroParams, HeroPiece, Readouts, RgbaImage, SkyKind, UvRange, Vec3, Warning,
 } from './schema.ts';
 
 const DEG = Math.PI / 180;
@@ -281,6 +281,46 @@ export function sunAngleDeg(ticks: number): number {
   const p = mod((ticks - NOON_TICK) / TICKS_PER_DAY, 1);
   const [x1, y1, x2, y2] = SUN_ANGLE_BEZIER;
   return 360 * cubicBezier(x1, y1, x2, y2, p);
+}
+
+/**
+ * A sky layer's fade alpha at a time (PLAN §17.2): a port of Nuit's AbstractSkybox.updateAlpha, using
+ * Utils.findClosestKeyframes and Utils.calculateInterpolatedAlpha. No keyframes means always on (1).
+ * Otherwise it interpolates linearly between the keyframes either side of the time, wrapping around the
+ * day. Nuit works in whole ticks, so the time is floored first; alphas are clamped to [0, 1], as Nuit's
+ * codec does when it reads them.
+ */
+export function fadeAlpha(keys: readonly FadeKey[], ticks: number): number {
+  if (keys.length === 0) return 1;
+  const time = mod(Math.floor(ticks), TICKS_PER_DAY);
+  let first = keys[0];
+  let last = keys[0];
+  let current: FadeKey | null = null; // the last keyframe at or before the time
+  let next: FadeKey | null = null; // the first keyframe after it
+  for (const key of keys) {
+    if (key.tick < first.tick) first = key;
+    if (key.tick > last.tick) last = key;
+    if (key.tick <= time && (current === null || key.tick > current.tick)) current = key;
+    if (key.tick > time && (next === null || key.tick < next.tick)) next = key;
+  }
+  if (current === null || next === null) {
+    // Before the first keyframe or after the last: the span from the last keyframe round to the first.
+    current = last;
+    next = first;
+  }
+  const a = clamp(current.alpha, 0, 1);
+  const b = clamp(next.alpha, 0, 1);
+  if (a === b || current.tick === next.tick) return b;
+  let span: number;
+  let passed: number;
+  if (current.tick > next.tick) {
+    span = TICKS_PER_DAY - current.tick + next.tick;
+    passed = time < next.tick ? TICKS_PER_DAY - current.tick + time : time - current.tick;
+  } else {
+    span = next.tick - current.tick;
+    passed = time - current.tick;
+  }
+  return a + (passed / span) * (b - a);
 }
 
 /** Compass bearing at noon (clockwise from north) for a raw mapping Y. Negative = west of north. */
